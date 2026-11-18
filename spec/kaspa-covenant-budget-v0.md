@@ -151,10 +151,13 @@ with `C = 10^12`. Measured with the consensus mass calculator on real vault tran
 | Compute mass of a payment (full vault, 3-entry allowlist) | 3 578 g |
 | Transient mass | 3 392 g |
 | Storage mass, 0.2 KAS payment from a 5 KAS vault | 50 359 g |
-| Smallest payment from a large vault | ≈ 0.1 KAS (`C / amount ≤ 100 000`) |
-| Survival floor of a lane (fee 0.015 KAS) | ≈ 0.53 KAS |
+| Network limit on storage mass (measured on testnet-10, 2026-11-18) | 500 000 g |
+| Smallest payment from a large vault | ≈ 0.02 KAS (`C / amount ≤ 500 000`) |
+| Survival floor of a lane (fee 0.015 KAS) | ≈ 0.125 KAS |
 
-Consequences for merchants: offers below 0.1 KAS cannot be settled one-by-one with this profile
+Empirical check (testnet-10, run 8): a 0.05 KAS payment (≈ 200 000 g of storage mass) was accepted; a 0.01 KAS payment was rejected with `transaction storage mass of 1000055 is larger than max allowed size of 500000`, exactly the value our calculator gives. The relay fee depends on compute and transient mass only, not on storage mass; under congestion a high-storage transaction may still rank lower in block templates.
+
+Consequences for merchants: offers below 0.02 KAS cannot be settled one-by-one with this profile
 (true micro-payments need aggregation, out of scope for v0). Clients MUST compute the mass before
 signing and refuse non-standard transactions. A lane below the floor is recovered by the owner
 (`ownerControl`, possibly with an extra owner input and a single output).

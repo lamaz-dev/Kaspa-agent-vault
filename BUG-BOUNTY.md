@@ -14,8 +14,8 @@ Hors périmètre :
   sociale, le déni de service par simple volume réseau ;
 - **dépenser dans le budget légitime** : avec la clé de l'agent (publiée pour l'épreuve), payer
   n'importe qui jusqu'au plafond est le comportement prévu, pas une faille ;
-- les limites de masse KIP-9 documentées (paiement minimal ≈ 0,1 KAS, couloir bloqué sous
-  ≈ 0,53 KAS tant que le propriétaire ne le recharge pas) ;
+- les limites de masse KIP-9 documentées (paiement minimal ≈ 0,02 KAS, couloir bloqué sous
+  ≈ 0,125 KAS tant que le propriétaire ne le recharge pas) ;
 - la course `claim`/`refund` du séquestre après le délai (risque R22, documenté) ;
 - les bugs du compilateur SilverScript lui-même, à signaler à ses auteurs (une mention reste
   appréciée).

@@ -237,7 +237,7 @@ pub fn build_pay(
     if let Some(m) = masse::masses(&tx, std::slice::from_ref(&entry)) {
         if !m.standard() && !masse::FORCER.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(format!(
-                "paiement non diffusable : masse de stockage {} g > {} g (KIP-9). Paiement minimal ≈ 0,1 KAS ; un couloir sous ≈ 0,53 KAS ne peut plus payer, le propriétaire doit le recharger ou le vider.",
+                "paiement non diffusable : masse de stockage {} g > {} g (KIP-9). Paiement minimal ≈ 0,02 KAS ; un couloir sous ≈ 0,13 KAS ne peut plus payer, le propriétaire doit le recharger ou le vider.",
                 m.storage, masse::MAX_STANDARD_MASS
             ).into());
         }

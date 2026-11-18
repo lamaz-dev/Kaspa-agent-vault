@@ -43,6 +43,6 @@ Limite connue (R22) : après le délai, `claim` et `refund` restent tous deux po
 | # | Limite | Valeur mesurée | Vérifié par |
 |---|---|---|---|
 | P1 | Masse de calcul d'un paiement | 3 578 g | `masses_d_un_paiement_reel_sous_le_plafond` |
-| P2 | Paiement minimal (KIP-9) | ≈ 0,1 KAS | `micro_paiement_refuse_par_kip9` |
-| P3 | Plancher de survie d'un couloir | ≈ 0,53 KAS | `plancher_de_survie` |
+| P2 | Paiement minimal (KIP-9) | ≈ 0,02 KAS (limite réseau 500 000 g, observée sur testnet-10) | `micro_paiement_refuse_par_kip9`, `calcul_identique_au_reseau` |
+| P3 | Plancher de survie d'un couloir | ≈ 0,125 KAS | `plancher_de_survie` |
 | P4 | Arithmétique | entiers signés 64 bits ; `capacity × refillPeriod < 2^63` imposé à la création | `check_params` |

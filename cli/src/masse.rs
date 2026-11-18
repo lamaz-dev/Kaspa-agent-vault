@@ -12,8 +12,10 @@ use kaspa_consensus_core::tx::{PopulatedTransaction, Transaction, UtxoEntry};
 /// Option `--forcer-masse` : laisser le réseau trancher au lieu de refuser localement.
 pub static FORCER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Masse maximale d'une transaction standard (politique du mempool).
-pub const MAX_STANDARD_MASS: u64 = 100_000;
+/// Masse maximale acceptée par le réseau, mesurée sur le testnet-10 le 18 novembre 2026 (essai 8) :
+/// « transaction storage mass of 1000055 is larger than max allowed size of 500000 ».
+/// Une transaction de 200 000 g de stockage a été acceptée : l'ancien plafond de 100 000 g ne s'applique plus.
+pub const MAX_STANDARD_MASS: u64 = 500_000;
 /// Paramètre C de KIP-9 (1 KAS × 10 000).
 pub const STORM: u64 = kaspa_consensus_core::constants::STORAGE_MASS_PARAMETER;
 
@@ -157,11 +159,21 @@ mod tests {
     }
 
     #[test]
+    fn calcul_identique_au_reseau() {
+        // Essai 8 sur testnet-10 : coffre de 4,305 TKAS, paiement de 0,01 TKAS refusé par le réseau avec
+        // « transaction storage mass of 1000055 ». Notre calcul doit donner exactement ce chiffre.
+        let v = 430_500_000u64;
+        let m = pay_storage_mass(v, 1_000_000, v - 1_000_000 - FEE, 1).unwrap();
+        eprintln!("masse calculée {m} g (réseau : 1000055 g)");
+        assert_eq!(m, 1_000_055);
+    }
+
+    #[test]
     fn plancher_de_survie() {
         let f = survival_floor(FEE);
         eprintln!("{}", rapport(FEE));
-        // Paiement ≥ ~0,1 TKAS et continuation (pluralité 2) ≥ ~0,4 TKAS.
-        assert!(f > 40_000_000 && f < 60_000_000, "plancher inattendu : {f}");
+        // Plafond réseau 500 000 g : paiement ≥ ~0,02 TKAS et continuation (pluralité 2) ≥ ~0,08 TKAS.
+        assert!(f > 10_000_000 && f < 15_000_000, "plancher inattendu : {f}");
         assert!(min_payment(f, FEE).is_some());
         assert!(min_payment(f - 1, FEE).is_none());
     }
