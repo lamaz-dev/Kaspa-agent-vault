@@ -111,3 +111,60 @@ Solde du propriétaire : 1494.985 TKAS (1 UTXO)
 Coffre : 3.14 TKAS, budget disponible ~0.25827776 TKAS (sortie 1607a240186c6b40193e833dd9de53157983d41f543f353bbd965f65b4ccbbb9:1)
 
 ```
+
+## 2026-11-18 14:48 UTC
+
+```
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626774290
+Solde du propriétaire : 1494.985 TKAS (1 UTXO)
+Coffre : 3.14 TKAS, budget disponible ~1.08049999 TKAS (sortie 1607a240186c6b40193e833dd9de53157983d41f543f353bbd965f65b4ccbbb9:1)
+
+$ vault-cli demo-x402
+Vendeur de démo sur http://127.0.0.1:8402, paiements reçus sur kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+
+=== Scénario 1 : achat normal, payé directement depuis le coffre ===
+
+[AGENT] GET http://127.0.0.1:8402/meteo-kaspa
+[VENDEUR] /meteo-kaspa : paiement requis (0.2 TKAS)
+[AGENT] 402 reçu : 0.2 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain (3.14 TKAS)
+[VENDEUR] solvable : budget restant 1.08327776 TKAS ≥ prix 0.2 TKAS
+[VENDEUR] autorisation valide : signée par la clé agent du coffre pour cette requête
+[VENDEUR] paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/a7c6e85b5b002cc70a9b75e5d8828ff7dc4cc0a39c3ddffd184afbf573b79367
+[AGENT] ✅ contenu reçu : « Météo du réseau Kaspa : 10 blocs/s, mempool calme, frais bas. »
+[AGENT] reçu de paiement : transaction a7c6e85b5b002cc70a9b75e5d8828ff7dc4cc0a39c3ddffd184afbf573b79367
+
+=== Scénario 2 : prix au-dessus du plafond, le vendeur refuse avant toute diffusion ===
+
+[AGENT] GET http://127.0.0.1:8402/rapport-premium
+[VENDEUR] /rapport-premium : paiement requis (1 TKAS)
+[AGENT] 402 reçu : 1 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain (2.925 TKAS)
+[VENDEUR] /rapport-premium : refusé avant diffusion : prix 1 TKAS > plafond par paiement du coffre (0.5 TKAS)
+[AGENT] ❌ refusé par le vendeur : refusé avant diffusion : prix 1 TKAS > plafond par paiement du coffre (0.5 TKAS)
+
+=== Scénario 3 : l'agent présente un faux coffre, le vendeur le démasque ===
+
+[AGENT] GET http://127.0.0.1:8402/meteo-kaspa
+[VENDEUR] /meteo-kaspa : paiement requis (0.2 TKAS)
+[AGENT] 402 reçu : 0.2 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+[AGENT] (test) j'annonce un faux coffre avec un budget 100 fois plus grand
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] /meteo-kaspa : coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne
+[AGENT] ❌ refusé par le vendeur : coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626774393
+Solde du propriétaire : 1494.985 TKAS (1 UTXO)
+Coffre : 2.925 TKAS, budget disponible ~0.8862222 TKAS (sortie a7c6e85b5b002cc70a9b75e5d8828ff7dc4cc0a39c3ddffd184afbf573b79367:1)
+
+```
