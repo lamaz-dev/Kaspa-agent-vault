@@ -1,5 +1,4 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 3 : déploiement
-etat
+# essai 4 : déploiement, frais relevés
 deployer
 etat
