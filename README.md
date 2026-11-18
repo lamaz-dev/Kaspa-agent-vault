@@ -14,7 +14,7 @@ par le réseau Kaspa (covenant SilverScript), pas par un logiciel.
 ## Contenu
 
 - `contrat/agent_budget.sil` — le contrat, commenté en français.
-- `tests/agent_budget_tests.rs` — les tests. Pour les lancer : copier le fichier dans
+- `tests/agent_budget_tests.rs` — les tests. Pour les lancer : copier ce fichier et `agent_budget.sil` dans
   `silverscript/silverscript-lang/tests/` (dépôt kaspanet/silverscript), puis
   `cargo test --release -p silverscript-lang --test agent_budget_tests`.
 

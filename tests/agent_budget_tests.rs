@@ -15,7 +15,7 @@ use silverscript_lang::compiler::CompileOptions;
 
 use common::{bytecode, compile_contract, encode_entry_sig_script, execute_input_with_covenants, push_redeem_script};
 
-const SOURCE: &str = include_str!("../../../contrat/agent_budget.sil");
+const SOURCE: &str = include_str!("agent_budget.sil");
 
 const CAPACITY: i64 = 2_000_000_000; // 20 KAS
 const REFILL: i64 = 6_048_000; // ~1 semaine à 10 DAA/s
