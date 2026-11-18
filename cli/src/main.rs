@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use silverscript_abi::{ArtifactValue, SilAbiArtifact, encode_contract_entry_sig_script};
 use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_with_options};
 
+mod masse;
 mod x402;
 
 const SOURCE: &str = include_str!("../../contracts/agent_budget.sil");
@@ -151,7 +152,27 @@ impl VaultParams {
     }
 }
 
+/// Garde-fous sur les paramètres, appliqués à la création (outil) et à la vérification (vendeur).
+/// Le script calcule `elapsed * capacity` avec `elapsed <= refillPeriod` : ce produit doit tenir sur 63 bits,
+/// sinon chaque paiement échouerait (coffre bloqué, fonds récupérables seulement par le propriétaire).
+pub fn check_params(p: &VaultParams) -> Res<()> {
+    if p.capacity <= 0 || p.refill_period <= 0 || p.max_per_payment <= 0 || p.max_fee < 0 {
+        return Err("paramètres invalides : capacité, période, plafond doivent être positifs".into());
+    }
+    if p.capacity.checked_mul(p.refill_period).is_none() {
+        return Err("paramètres invalides : capacité × période de recharge dépasse 2^63".into());
+    }
+    if p.max_per_payment > p.capacity || p.max_fee > p.capacity || p.tokens < 0 || p.tokens > p.capacity {
+        return Err("paramètres invalides : plafond, frais ou jetons supérieurs à la capacité".into());
+    }
+    if p.lane < 0 || p.last_daa < 0 {
+        return Err("paramètres invalides : couloir ou DAA négatif".into());
+    }
+    Ok(())
+}
+
 pub fn compile_params(p: &VaultParams) -> Res<SilAbiArtifact> {
+    check_params(p)?;
     match p.asset.as_str() {
         ASSET_KAS => {}
         ASSET_KSD => return Err("monnaie KSD réservée : en attente du standard Kaspa Dollar".into()),
@@ -207,6 +228,15 @@ pub fn build_pay(
     };
     let outputs = vec![TransactionOutput::new(amount as u64, payee_spk), continuation];
     let mut tx = Transaction::new(1, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
+    // Masse critique (KIP-9) : refuser localement ce que le mempool refuserait.
+    if let Some(m) = masse::masses(&tx, std::slice::from_ref(&entry)) {
+        if !m.standard() {
+            return Err(format!(
+                "paiement non diffusable : masse de stockage {} g > {} g (KIP-9). Paiement minimal ≈ 0,1 KAS ; un couloir sous ≈ 0,53 KAS ne peut plus payer, le propriétaire doit le recharger ou le vider.",
+                m.storage, masse::MAX_STANDARD_MASS
+            ).into());
+        }
+    }
     let s = sign(&tx, &[entry], 0, agent);
     tx.inputs[0].signature_script = vault_sigscript(&vault, "pay", &[s.into(), amount.into(), now.into()])?;
     tx.finalize();
@@ -283,6 +313,11 @@ async fn main() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("aide");
 
+    if cmd == "masse" {
+        print!("{}", masse::rapport(FEE));
+        return Ok(());
+    }
+
     if cmd == "pause" {
         let secs: u64 = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(5);
         tokio::time::sleep(Duration::from_secs(secs)).await;
@@ -290,6 +325,9 @@ async fn main() -> Res<()> {
         return Ok(());
     }
     if cmd == "cles" {
+        if env::var("GITHUB_ACTIONS").is_ok() || env::var("CI").is_ok() {
+            return Err("commande « cles » interdite en CI : elle afficherait des clés secrètes dans le journal public".into());
+        }
         for name in ["OWNER_SK", "AGENT_SK"] {
             let k = Keypair::new(secp256k1::SECP256K1, &mut secp256k1::rand::thread_rng());
             println!("{name}={}", hex::encode(k.secret_bytes()));

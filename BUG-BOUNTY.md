@@ -1,14 +1,24 @@
-# Prime aux bugs — AgentBudget v0.3 sur le testnet-10 (brouillon, pas encore annoncée)
+# Prime aux bugs — AgentBudget v0.4 sur le testnet-10 (brouillon, pas encore annoncée)
 
 ## Périmètre
 
-- Le contrat `contracts/agent_budget.sil` v0.3, déployé à l'adresse publiée ci-dessous sur le
+- Le contrat `contracts/agent_budget.sil` v0.4, déployé à l'adresse publiée ci-dessous sur le
   testnet-10 de Kaspa. Adresse et identifiant de lignée : *à publier lors de l'annonce*.
 - Le vendeur de démo x402 « covenant-budget » (`cli/src/x402.rs`), dans la mesure où une
   attaque peut être reproduite contre lui.
 
-Hors périmètre : le mainnet, les attaques contre GitHub ou l'infrastructure, les attaques à
-51 %, l'ingénierie sociale, le déni de service par simple volume réseau.
+- Le séquestre `contracts/delivery_escrow.sil` (paiement à la livraison), une fois déployé.
+
+Hors périmètre :
+- le mainnet, les attaques contre GitHub ou l'infrastructure, les attaques à 51 %, l'ingénierie
+  sociale, le déni de service par simple volume réseau ;
+- **dépenser dans le budget légitime** : avec la clé de l'agent (publiée pour l'épreuve), payer
+  n'importe qui jusqu'au plafond est le comportement prévu, pas une faille ;
+- les limites de masse KIP-9 documentées (paiement minimal ≈ 0,1 KAS, couloir bloqué sous
+  ≈ 0,53 KAS tant que le propriétaire ne le recharge pas) ;
+- la course `claim`/`refund` du séquestre après le délai (risque R22, documenté) ;
+- les bugs du compilateur SilverScript lui-même, à signaler à ses auteurs (une mention reste
+  appréciée).
 
 ## Conditions de victoire
 
@@ -29,6 +39,11 @@ La clé de l'agent pourra être publiée pour l'épreuve, afin de simuler un age
 ## Récompense
 
 À définir avant l'annonce (montant symbolique en KAS, mention dans le dépôt et sur Kaspa France).
+Une **réserve de divulgation** est prévue : une faille sérieuse signalée en privé, hors des
+conditions ci-dessus, peut aussi être récompensée.
+
+Premier arrivé, premier servi : une même faille n'est récompensée qu'une fois. Délai de
+divulgation publique : 30 jours après le signalement, ou dès la correction publiée.
 
 ## Référence
 

@@ -140,6 +140,38 @@ As in `kaspa-exact-v2`, with
 Intermediate step under study: a KAS-settled vault whose budget is denominated in dollars,
 converted at the miner-attested KAS price once that oracle is live.
 
+## 9b. Physical limits (KIP-9 storage mass)
+
+The vault continuation output carries a P2SH script (35 bytes) **and** a covenant id (32 bytes),
+so it occupies 2 storage units (plurality 2) and weighs `C · 4 / value` in the KIP-9 formula,
+with `C = 10^12`. Measured with the consensus mass calculator on real vault transactions:
+
+| Quantity | Value |
+|---|---|
+| Compute mass of a payment (full vault, 3-entry allowlist) | 3 578 g |
+| Transient mass | 3 392 g |
+| Storage mass, 0.2 KAS payment from a 5 KAS vault | 50 359 g |
+| Smallest payment from a large vault | ≈ 0.1 KAS (`C / amount ≤ 100 000`) |
+| Survival floor of a lane (fee 0.015 KAS) | ≈ 0.53 KAS |
+
+Consequences for merchants: offers below 0.1 KAS cannot be settled one-by-one with this profile
+(true micro-payments need aggregation, out of scope for v0). Clients MUST compute the mass before
+signing and refuse non-standard transactions. A lane below the floor is recovered by the owner
+(`ownerControl`, possibly with an extra owner input and a single output).
+
+## 9c. Delivery escrow (pay-on-delivery extension)
+
+A payment MAY target a `DeliveryEscrow` script instead of the merchant address: the merchant
+claims with a verifier signature over `requestHash || resultHash`; the agent's refund address
+recovers the funds after `timeoutDaa`.
+
+- Merchants MUST refuse escrows whose `timeoutDaa` is below their minimum (recommended:
+  ≥ 36 000 DAA, about one hour at 10 BPS) and MUST claim as soon as the proof is available.
+- After the timeout, both `claim` and `refund` are valid: Kaspa scripts can express "after"
+  (CSV) but not "before", so the first accepted transaction wins. This race is documented, not
+  a bug (threat model R22).
+- The escrow output has no covenant id: plurality 1, same mass rules as a plain payment.
+
 ## 10. Open questions for the Kaspa x402 maintainers
 
 - Should `vaultTemplate` be identified by a template hash rather than a name?

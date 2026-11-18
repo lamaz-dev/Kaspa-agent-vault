@@ -17,10 +17,15 @@ concurrency:
 
 jobs:
   run:
+    # Seul le propriétaire du dépôt peut déclencher une exécution qui a accès au secret.
+    # (Aucun déclencheur pull_request / pull_request_target : un fork ne voit jamais VAULT_PHRASE.)
+    if: github.actor == 'Filou-974' && github.repository == 'Filou-974/kaspa-agent-vault'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/cache@v4
         with:
           path: |
@@ -42,6 +47,11 @@ jobs:
             while IFS= read -r line || [ -n "$line" ]; do
               line="$(echo "$line" | sed 's/#.*//' | xargs)"
               [ -z "$line" ] && continue
+              cmd="${line%% *}"
+              case "$cmd" in
+                adresses|etat|deployer|payer|recharger|recuperer|demo-x402|pause|masse) ;;
+                *) echo "commande refusée (hors liste blanche) : $cmd"; continue ;;
+              esac
               echo "\$ vault-cli $line"
               ./cli/target/release/vault-cli $line 2>&1 || echo "(code de sortie $?)"
               echo ""

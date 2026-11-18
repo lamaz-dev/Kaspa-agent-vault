@@ -498,7 +498,6 @@ fn mesure_budget_de_calcul() {
     use kaspa_txscript::caches::Cache;
     use kaspa_txscript::covenants::CovenantsContext;
     use kaspa_txscript::{EngineCtx, EngineFlags, TxScriptEngine};
-    use kaspa_consensus_core::tx::VerifiableTransaction;
     let c = ctx();
     let vault = compile(&c, CAPACITY, 1_000);
     let next = compile(&c, CAPACITY - 100_000_000 - FEE_T, 1_000);
@@ -518,6 +517,7 @@ fn mesure_budget_de_calcul() {
     let cov_ctx = CovenantsContext::from_tx(&populated).unwrap();
     let cache = Cache::new(100);
     let reused = SigHashReusedValuesUnsync::new();
+    use kaspa_consensus_core::tx::VerifiableTransaction;
     let input = populated.inputs()[0].clone();
     let mut vm = TxScriptEngine::from_transaction_input(
         &populated,
@@ -553,4 +553,55 @@ fn instructions_de_bridge_refusees() {
     );
     eprintln!("refus attendu: {:?}", r.as_ref().err());
     assert!(r.is_err());
+}
+
+// ---------- liste de contrôle d'avant-lancement ----------
+
+#[test]
+fn agent_ne_peut_pas_changer_les_regles() {
+    // Le reste revient à un coffre au bon état mais avec d'autres règles (plafond 100 fois plus grand,
+    // clé propriétaire remplacée) : refusé, le script de continuation doit être identique.
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let thief = Ctx { owner: kp(99), agent: kp(2), payee: c.payee.clone(), payees: c.payees.clone() };
+    for next in [
+        compile_cfg(&c, Cfg { max_per_payment: CAPACITY * 100, ..DEFAULT }, CAPACITY - 100_000_000 - FEE_T, 1_000),
+        compile(&thief, CAPACITY - 100_000_000 - FEE_T, 1_000),
+    ] {
+        let r = run(
+            &vault,
+            vec![out(100_000_000, c.payee.clone()), cont(VAULT_VALUE - 100_000_000 - FEE_T as u64, pay_to_script_hash_script(&bytecode(&next)))],
+            1_000,
+            &c.agent,
+            "pay",
+            vec![100_000_000i64.into(), 1_000i64.into()],
+        );
+        eprintln!("refus attendu: {:?}", r.as_ref().err());
+        assert!(r.is_err());
+    }
+}
+
+#[test]
+fn proprietaire_peut_ajouter_une_entree_pour_payer_les_frais() {
+    // Reliquat trop petit pour couvrir les frais : le propriétaire ajoute une deuxième entrée.
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let mk = |b: u8| TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([b; 32]), 0), vec![], 0, 1000);
+    let mut tx = Transaction::new(1, vec![mk(7), mk(8)], vec![out(VAULT_VALUE + 1_000_000, p2pk(&kp(42)))], 0, Default::default(), 0, vec![]);
+    let utxos = vec![
+        UtxoEntry::new(VAULT_VALUE, pay_to_script_hash_script(&bytecode(&vault)), 0, false, Some(COV_A)),
+        UtxoEntry::new(2_000_000, p2pk(&c.owner), 0, false, None),
+    ];
+    let sighash = {
+        let reused = SigHashReusedValuesUnsync::new();
+        let populated = PopulatedTransaction::new(&tx, utxos.clone());
+        calc_schnorr_signature_hash(&populated, 0, SIG_HASH_ALL, &reused)
+    };
+    let mut sig = c.owner.sign_schnorr(Message::from_digest_slice(sighash.as_bytes().as_slice()).unwrap()).as_ref().to_vec();
+    sig.push(SIG_HASH_ALL.to_u8());
+    let mut ss = encode_entry_sig_script(&vault, "ownerControl", &[sig.into()]).unwrap();
+    ss.extend(push_redeem_script(&bytecode(&vault)));
+    tx.inputs[0].signature_script = ss;
+    let r = execute_input_with_covenants(tx, utxos, 0);
+    assert!(r.is_ok(), "{r:?}");
 }
