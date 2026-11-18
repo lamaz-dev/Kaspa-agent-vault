@@ -1,9 +1,5 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 5 : paiements de l agent
-payer 30000000
-payer 100000000 --sans-verif
-payer 50000000
-payer 50000000
-payer 50000000
-payer 50000000 --sans-verif
+# essai 6 : profil x402 covenant-budget
+etat
+demo-x402
 etat

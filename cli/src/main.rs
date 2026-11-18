@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize};
 use silverscript_abi::{ArtifactValue, SilAbiArtifact, encode_contract_entry_sig_script};
 use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_with_options};
 
+mod x402;
+
 const SOURCE: &str = include_str!("../../contracts/agent_budget.sil");
 
 // Réglages du coffre de test (en sompi : 1 KAS = 100 000 000 sompi).
@@ -44,19 +46,19 @@ const USE_ALLOWLIST: i64 = 0;
 const DAA_MARGIN: u64 = 100; // marge sous le score DAA du réseau (~10 s)
 
 #[derive(Serialize, Deserialize)]
-struct Etat {
-    txid: String,
-    index: u32,
-    valeur: u64,
-    tokens: i64,
-    last_daa: i64,
+pub struct Etat {
+    pub txid: String,
+    pub index: u32,
+    pub valeur: u64,
+    pub tokens: i64,
+    pub last_daa: i64,
 }
 
-type Res<T> = Result<T, Box<dyn std::error::Error>>;
+pub type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// Clés de test : dérivées de la phrase secrète VAULT_PHRASE (secret GitHub choisi par le
 /// propriétaire, jamais visible ailleurs), ou à défaut lues en hexadécimal dans OWNER_SK / AGENT_SK.
-fn keypair_from_env(var: &str) -> Res<Keypair> {
+pub fn keypair_from_env(var: &str) -> Res<Keypair> {
     if let Ok(phrase) = env::var("VAULT_PHRASE") {
         let phrase = phrase.trim();
         if phrase.len() < 16 {
@@ -70,49 +72,121 @@ fn keypair_from_env(var: &str) -> Res<Keypair> {
     Ok(Keypair::from_seckey_slice(secp256k1::SECP256K1, &bytes)?)
 }
 
-fn xonly(k: &Keypair) -> Vec<u8> {
+pub fn xonly(k: &Keypair) -> Vec<u8> {
     k.x_only_public_key().0.serialize().to_vec()
 }
 
-fn address(k: &Keypair) -> Address {
+pub fn address(k: &Keypair) -> Address {
     Address::new(Prefix::Testnet, Version::PubKey, &xonly(k))
 }
 
 /// Le « service » payé par l'agent : une adresse de test dérivée de la clé du propriétaire.
-fn payee(owner: &Keypair) -> Keypair {
+pub fn payee(owner: &Keypair) -> Keypair {
     let h = blake2b_simd::Params::new().hash_length(32).personal(b"vault-payee").hash(&owner.secret_bytes());
     Keypair::from_seckey_slice(secp256k1::SECP256K1, h.as_bytes()).unwrap()
 }
 
-fn compile(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Res<SilAbiArtifact> {
-    let zero: Vec<u8> = vec![0; 32];
+/// Paramètres publics d'un coffre (tout ce qu'il faut pour recompiler son script).
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VaultParams {
+    pub owner: String, // clé publique x-only, hex
+    pub agent: String,
+    pub lane: i64,
+    pub capacity: i64,
+    pub refill_period: i64,
+    pub max_per_payment: i64,
+    pub max_fee: i64,
+    pub use_allowlist: i64,
+    pub payees: [String; 3],
+    pub tokens: i64,
+    pub last_daa: i64,
+}
+
+impl VaultParams {
+    pub fn ours(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Self {
+        let zero = hex::encode([0u8; 32]);
+        VaultParams {
+            owner: hex::encode(xonly(owner)),
+            agent: hex::encode(xonly(agent)),
+            lane: LANE,
+            capacity: CAPACITY,
+            refill_period: REFILL,
+            max_per_payment: MAX_PER_PAYMENT,
+            max_fee: MAX_FEE,
+            use_allowlist: USE_ALLOWLIST,
+            payees: [zero.clone(), zero.clone(), zero],
+            tokens,
+            last_daa,
+        }
+    }
+    /// Budget disponible à l'instant `now` (même calcul que le contrat).
+    pub fn available(&self, now: i64) -> i64 {
+        let elapsed = (now - self.last_daa).clamp(0, self.refill_period);
+        (self.tokens + elapsed * self.capacity / self.refill_period).min(self.capacity)
+    }
+}
+
+pub fn compile_params(p: &VaultParams) -> Res<SilAbiArtifact> {
+    let b = |h: &str| -> Res<ArtifactValue> { Ok(hex::decode(h)?.into()) };
     let args: Vec<ArtifactValue> = vec![
-        xonly(owner).into(),
-        xonly(agent).into(),
-        LANE.into(),
-        CAPACITY.into(),
-        REFILL.into(),
-        MAX_PER_PAYMENT.into(),
-        MAX_FEE.into(),
-        USE_ALLOWLIST.into(),
-        zero.clone().into(),
-        zero.clone().into(),
-        zero.into(),
-        tokens.into(),
-        last_daa.into(),
+        b(&p.owner)?,
+        b(&p.agent)?,
+        p.lane.into(),
+        p.capacity.into(),
+        p.refill_period.into(),
+        p.max_per_payment.into(),
+        p.max_fee.into(),
+        p.use_allowlist.into(),
+        b(&p.payees[0])?,
+        b(&p.payees[1])?,
+        b(&p.payees[2])?,
+        p.tokens.into(),
+        p.last_daa.into(),
     ];
     Ok(compile_to_sil_abi_artifact_with_options(SOURCE, &args, CompileOptions::default())?)
 }
 
-fn bytecode(a: &SilAbiArtifact) -> Vec<u8> {
+fn compile(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Res<SilAbiArtifact> {
+    compile_params(&VaultParams::ours(owner, agent, tokens, last_daa))
+}
+
+/// Construit et signe un paiement de l'agent depuis le coffre.
+/// Renvoie la transaction, l'état suivant et la valeur restante dans le coffre.
+pub fn build_pay(
+    owner: &Keypair,
+    agent: &Keypair,
+    e: &Etat,
+    amount: i64,
+    payee_spk: ScriptPublicKey,
+    now: i64,
+) -> Res<(Transaction, Etat)> {
+    let p = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
+    let available = p.available(now);
+    let vault = compile_params(&p)?;
+    let next_tokens = available - amount;
+    let next = compile(owner, agent, next_tokens, now)?;
+    let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, None);
+    let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
+    let input = TransactionInput::new(TransactionOutpoint::new(txid_in, e.index), vec![], 0, 1);
+    let rest = e.valeur - amount as u64 - FEE;
+    let outputs = vec![TransactionOutput::new(amount as u64, payee_spk), TransactionOutput::new(rest, vault_spk(&next))];
+    let mut tx = Transaction::new(0, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
+    let s = sign(&tx, &[entry], 0, agent);
+    tx.inputs[0].signature_script = vault_sigscript(&vault, "pay", &[s.into(), amount.into(), now.into()])?;
+    tx.finalize();
+    let next_state = Etat { txid: tx.id().to_string(), index: 1, valeur: rest, tokens: next_tokens, last_daa: now };
+    Ok((tx, next_state))
+}
+
+pub fn bytecode(a: &SilAbiArtifact) -> Vec<u8> {
     a.contracts.values().next().expect("un contrat").compiled.bytecode.clone()
 }
 
-fn vault_spk(a: &SilAbiArtifact) -> ScriptPublicKey {
+pub fn vault_spk(a: &SilAbiArtifact) -> ScriptPublicKey {
     pay_to_script_hash_script(&bytecode(a))
 }
 
-fn sign(tx: &Transaction, entries: &[UtxoEntry], idx: usize, k: &Keypair) -> Vec<u8> {
+pub fn sign(tx: &Transaction, entries: &[UtxoEntry], idx: usize, k: &Keypair) -> Vec<u8> {
     let reused = SigHashReusedValuesUnsync::new();
     let populated = PopulatedTransaction::new(tx, entries.to_vec());
     let h = calc_schnorr_signature_hash(&populated, idx, SIG_HASH_ALL, &reused);
@@ -122,7 +196,7 @@ fn sign(tx: &Transaction, entries: &[UtxoEntry], idx: usize, k: &Keypair) -> Vec
     s
 }
 
-fn vault_sigscript(a: &SilAbiArtifact, entry: &str, args: &[ArtifactValue]) -> Res<Vec<u8>> {
+pub fn vault_sigscript(a: &SilAbiArtifact, entry: &str, args: &[ArtifactValue]) -> Res<Vec<u8>> {
     let name = a.contracts.keys().next().expect("un contrat").clone();
     let mut ss = encode_contract_entry_sig_script(a, &name, entry, args)?;
     ss.extend(ScriptBuilder::with_flags(EngineFlags::default()).add_data(&bytecode(a))?.drain());
@@ -133,11 +207,11 @@ fn state_path() -> String {
     env::var("ETAT").unwrap_or_else(|_| "testnet/etat-coffre.json".into())
 }
 
-fn load_state() -> Res<Etat> {
+pub fn load_state() -> Res<Etat> {
     Ok(serde_json::from_str(&fs::read_to_string(state_path()).map_err(|_| "aucun coffre déployé (fichier d'état absent)")?)?)
 }
 
-fn save_state(e: &Etat) -> Res<()> {
+pub fn save_state(e: &Etat) -> Res<()> {
     let p = state_path();
     if let Some(dir) = std::path::Path::new(&p).parent() {
         fs::create_dir_all(dir)?;
@@ -146,7 +220,7 @@ fn save_state(e: &Etat) -> Res<()> {
     Ok(())
 }
 
-async fn connect() -> Res<KaspaRpcClient> {
+pub async fn connect() -> Res<KaspaRpcClient> {
     let net = NetworkId::with_suffix(NetworkType::Testnet, 10);
     let client = KaspaRpcClient::new_with_args(WrpcEncoding::Borsh, None, Some(Resolver::default()), Some(net), None)?;
     let opts = ConnectOptions {
@@ -160,11 +234,11 @@ async fn connect() -> Res<KaspaRpcClient> {
     Ok(client)
 }
 
-async fn virtual_daa(c: &KaspaRpcClient) -> Res<u64> {
+pub async fn virtual_daa(c: &KaspaRpcClient) -> Res<u64> {
     Ok(c.get_block_dag_info().await?.virtual_daa_score)
 }
 
-fn explorer(txid: &str) -> String {
+pub fn explorer(txid: &str) -> String {
     format!("https://tn10.kaspa.stream/transactions/{txid}")
 }
 
@@ -267,25 +341,11 @@ async fn main() -> Res<()> {
             if !no_check && (amount > available || amount > MAX_PER_PAYMENT) {
                 return Err("refusé localement : dépasse le budget ou le plafond par paiement (--sans-verif pour laisser le réseau trancher)".into());
             }
-            let vault = compile(&owner, &agent, e.tokens, e.last_daa)?;
-            let next_tokens = available - amount;
-            let next = compile(&owner, &agent, next_tokens, now)?;
-            let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, None);
-            let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
-            let input = TransactionInput::new(TransactionOutpoint::new(txid_in, e.index), vec![], 0, 1);
-            let rest = e.valeur - amount as u64 - FEE;
-            let outputs = vec![
-                TransactionOutput::new(amount as u64, pay_to_address_script(&address(&service))),
-                TransactionOutput::new(rest, vault_spk(&next)),
-            ];
-            let mut tx = Transaction::new(0, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
-            let s = sign(&tx, &[entry], 0, &agent);
-            tx.inputs[0].signature_script = vault_sigscript(&vault, "pay", &[s.into(), amount.into(), now.into()])?;
-            tx.finalize();
+            let (tx, next_state) = build_pay(&owner, &agent, &e, amount, pay_to_address_script(&address(&service)), now)?;
             match c.submit_transaction((&tx).into(), false).await {
                 Ok(txid) => {
                     println!("Paiement accepté par le réseau : {}", explorer(&txid.to_string()));
-                    save_state(&Etat { txid: txid.to_string(), index: 1, valeur: rest, tokens: next_tokens, last_daa: now })?;
+                    save_state(&next_state)?;
                 }
                 Err(err) => {
                     println!("Paiement REFUSÉ par le réseau : {err}");
@@ -310,6 +370,9 @@ async fn main() -> Res<()> {
             println!("Coffre récupéré par le propriétaire : {}", explorer(&txid.to_string()));
             fs::remove_file(state_path())?;
             c.disconnect().await?;
+        }
+        "demo-x402" => {
+            x402::demo(&owner, &agent).await?;
         }
         _ => {
             println!("Commandes : cles | adresses | etat | deployer | payer <sompi> [--sans-verif] | recuperer");
