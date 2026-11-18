@@ -30,3 +30,25 @@ Solde du propriétaire : 0 TKAS (0 UTXO)
 Coffre : pas encore déployé
 
 ```
+
+## 2026-11-18 14:08 UTC
+
+```
+$ vault-cli etat
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626749810
+Solde du propriétaire : 1500 TKAS (1 UTXO)
+Coffre : pas encore déployé
+
+$ vault-cli deployer
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Error: RpcSubsystem("Rejected transaction 88abeaf92b54ddc3b6bff35c4e4c7929d7fcd6e045f4159b4aea1ddbc117ba2c: transaction 88abeaf92b54ddc3b6bff35c4e4c7929d7fcd6e045f4159b4aea1ddbc117ba2c is not standard: transaction has 30000 fees which is under the required amount of 204700 for compute mass 2047")
+(code de sortie 1)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626750431
+Solde du propriétaire : 1500 TKAS (1 UTXO)
+Coffre : pas encore déployé
+
+```
