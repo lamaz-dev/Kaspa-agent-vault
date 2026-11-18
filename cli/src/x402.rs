@@ -100,31 +100,21 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     let params: VaultParams = serde_json::from_value(p["vault"]["params"].clone()).map_err(|_| "paramètres du coffre invalides")?;
     let txid_in = p["vault"]["outpoint"]["txid"].as_str().ok_or("outpoint manquant")?;
     let index_in = p["vault"]["outpoint"]["index"].as_u64().ok_or("outpoint manquant")? as u32;
-    let artifact = compile_params(&params).map_err(|e| format!("recompilation impossible : {e}"))?;
-    let spk = vault_spk(&artifact);
+    let spk = cached_spk(&params)?;
     let vault_addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
     let utxos = rpc.get_utxos_by_addresses(vec![vault_addr]).await.map_err(|e| format!("nœud : {e}"))?;
     let on_chain = utxos.iter().find(|u| u.outpoint.transaction_id.to_string() == txid_in && u.outpoint.index == index_in);
     let Some(vault_utxo) = on_chain else {
         return Err("coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne".into());
     };
-    println!("[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain ({} TKAS)", vault_utxo.utxo_entry.amount as f64 / 1e8);
-
-    // 2. Solvabilité et plafond, avant toute diffusion.
-    let now = (rpc.get_block_dag_info().await.map_err(|e| format!("nœud : {e}"))?.virtual_daa_score - 100) as i64;
-    let available = params.available(now);
-    let price = offer.price as i64;
-    if price > params.max_per_payment {
-        return Err(format!(
-            "refusé avant diffusion : prix {} TKAS > plafond par paiement du coffre ({} TKAS)",
-            price as f64 / 1e8,
-            params.max_per_payment as f64 / 1e8
-        ));
-    }
-    if price > available {
-        return Err(format!("refusé avant diffusion : budget restant du coffre {} TKAS < prix", available as f64 / 1e8));
-    }
-    println!("[VENDEUR] solvable : budget restant {} TKAS ≥ prix {} TKAS", available as f64 / 1e8, price as f64 / 1e8);
+    let Some(lineage) = vault_utxo.utxo_entry.covenant_id else {
+        return Err("fonds hors lignée : cette sortie n'appartient à aucun coffre (identifiant de covenant absent)".into());
+    };
+    println!(
+        "[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain ({} TKAS), lignée {}",
+        vault_utxo.utxo_entry.amount as f64 / 1e8,
+        lineage
+    );
 
     // 3. Transaction : dépense bien ce coffre et paie exactement le prix au vendeur.
     let tx_bytes = hex::decode(p["transaction"].as_str().ok_or("transaction manquante")?).map_err(|_| "transaction illisible")?;
@@ -138,6 +128,26 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     if tx.outputs[0].script_public_key != pay_to_address_script(pay_to) || tx.outputs[0].value != offer.price {
         return Err("la sortie 0 ne paie pas exactement le prix au vendeur".into());
     }
+
+    // 2. Solvabilité et plafond, avant toute diffusion.
+    let now = (rpc.get_block_dag_info().await.map_err(|e| format!("nœud : {e}"))?.virtual_daa_score - 100) as i64;
+    let available = params.available(now);
+    let price = offer.price as i64;
+    if price > params.max_per_payment {
+        return Err(format!(
+            "refusé avant diffusion : prix {} TKAS > plafond par paiement du coffre ({} TKAS)",
+            price as f64 / 1e8,
+            params.max_per_payment as f64 / 1e8
+        ));
+    }
+    let spent = vault_utxo.utxo_entry.amount as i64 - tx.outputs[1].value as i64; // prix + frais
+    if spent - price > params.max_fee || spent < price {
+        return Err("frais de la transaction hors des limites du coffre".into());
+    }
+    if spent > available {
+        return Err(format!("refusé avant diffusion : budget restant du coffre {} TKAS < prix + frais", available as f64 / 1e8));
+    }
+    println!("[VENDEUR] solvable : budget restant {} TKAS ≥ prix {} TKAS", available as f64 / 1e8, price as f64 / 1e8);
 
     // 4. Autorisation de la requête par la clé agent inscrite dans le coffre.
     let a = &p["authorization"];
@@ -175,6 +185,26 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
         }
     }
     Err("paiement diffusé mais pas encore accepté après 30 s".into())
+}
+
+/// Cache des scripts déjà recompilés (protège le vendeur contre un déluge de fausses demandes).
+fn cached_spk(params: &VaultParams) -> Result<kaspa_consensus_core::tx::ScriptPublicKey, String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, kaspa_consensus_core::tx::ScriptPublicKey>>> = OnceLock::new();
+    let key = serde_json::to_string(params).map_err(|_| "paramètres invalides")?;
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(spk) = cache.lock().unwrap().get(&key) {
+        return Ok(spk.clone());
+    }
+    let artifact = compile_params(params).map_err(|e| format!("recompilation impossible : {e}"))?;
+    let spk = vault_spk(&artifact);
+    let mut c = cache.lock().unwrap();
+    if c.len() > 10_000 {
+        c.clear();
+    }
+    c.insert(key, spk.clone());
+    Ok(spk)
 }
 
 fn serve(handle: Handle, pay_to: Address) {
@@ -243,7 +273,7 @@ fn agent_buy(handle: &Handle, owner: &Keypair, agent: &Keypair, url: &str, mode:
     let rpc = handle.block_on(connect())?;
     let now = (handle.block_on(virtual_daa(&rpc))? - 100) as i64;
     let mut params = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
-    if mode == Mode::Normal && (amount > params.max_per_payment || amount > params.available(now)) {
+    if mode == Mode::Normal && (amount > params.max_per_payment || amount + FEE as i64 > params.available(now)) {
         println!("[AGENT] je refuse moi-même : prix hors du budget de mon coffre");
         return Ok(());
     }

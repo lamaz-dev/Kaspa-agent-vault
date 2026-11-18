@@ -1,5 +1,13 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 6 : profil x402 covenant-budget
+# essai 7 : v0.3 (frais dans le budget, lignée KIP-20)
+deployer
+pause 15
+etat
+payer 30000000
+pause 10
+payer 100000000 --sans-verif
+recharger 200000000
+pause 15
 etat
 demo-x402
 etat

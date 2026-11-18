@@ -17,9 +17,11 @@ use std::{env, fs, time::Duration};
 use kaspa_addresses::{Address, Prefix, Version};
 use kaspa_consensus_core::hashing::sighash::{SigHashReusedValuesUnsync, calc_schnorr_signature_hash};
 use kaspa_consensus_core::hashing::sighash_type::SIG_HASH_ALL;
+use kaspa_consensus_core::Hash;
+use kaspa_consensus_core::hashing::covenant_id::covenant_id;
 use kaspa_consensus_core::network::{NetworkId, NetworkType};
 use kaspa_consensus_core::tx::{
-    PopulatedTransaction, ScriptPublicKey, Transaction, TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput,
+    CovenantBinding, PopulatedTransaction, ScriptPublicKey, Transaction, TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput,
     UtxoEntry,
 };
 use kaspa_txscript::script_builder::ScriptBuilder;
@@ -52,7 +54,20 @@ pub struct Etat {
     pub valeur: u64,
     pub tokens: i64,
     pub last_daa: i64,
+    /// Identifiant de covenant (KIP-20) de la lignée du coffre, hex.
+    #[serde(default)]
+    pub cov_id: String,
 }
+
+impl Etat {
+    pub fn covenant(&self) -> Res<Hash> {
+        Ok(Hash::from_bytes(<[u8; 32]>::try_from(hex::decode(&self.cov_id)?.as_slice()).map_err(|_| "identifiant de covenant absent : redéployer le coffre (v0.3)")?))
+    }
+}
+
+/// Budget de calcul (transactions v1) : un paiement mesuré coûte 11 unités, on prend une marge.
+pub const CB_VAULT: u16 = 20;
+pub const CB_P2PK: u16 = 15;
 
 pub type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -163,18 +178,24 @@ pub fn build_pay(
     let p = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
     let available = p.available(now);
     let vault = compile_params(&p)?;
-    let next_tokens = available - amount;
+    let cov = e.covenant()?;
+    let next_tokens = available - amount - FEE as i64; // les frais sont décomptés du budget
     let next = compile(owner, agent, next_tokens, now)?;
-    let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, None);
+    let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, Some(cov));
     let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
-    let input = TransactionInput::new(TransactionOutpoint::new(txid_in, e.index), vec![], 0, 1);
+    let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT);
     let rest = e.valeur - amount as u64 - FEE;
-    let outputs = vec![TransactionOutput::new(amount as u64, payee_spk), TransactionOutput::new(rest, vault_spk(&next))];
-    let mut tx = Transaction::new(0, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
+    let continuation = TransactionOutput {
+        value: rest,
+        script_public_key: vault_spk(&next),
+        covenant: Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }),
+    };
+    let outputs = vec![TransactionOutput::new(amount as u64, payee_spk), continuation];
+    let mut tx = Transaction::new(1, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
     let s = sign(&tx, &[entry], 0, agent);
     tx.inputs[0].signature_script = vault_sigscript(&vault, "pay", &[s.into(), amount.into(), now.into()])?;
     tx.finalize();
-    let next_state = Etat { txid: tx.id().to_string(), index: 1, valeur: rest, tokens: next_tokens, last_daa: now };
+    let next_state = Etat { txid: tx.id().to_string(), index: 1, valeur: rest, tokens: next_tokens, last_daa: now, cov_id: e.cov_id.clone() };
     Ok((tx, next_state))
 }
 
@@ -247,6 +268,12 @@ async fn main() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("aide");
 
+    if cmd == "pause" {
+        let secs: u64 = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(5);
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        println!("(pause de {secs} s)");
+        return Ok(());
+    }
     if cmd == "cles" {
         for name in ["OWNER_SK", "AGENT_SK"] {
             let k = Keypair::new(secp256k1::SECP256K1, &mut secp256k1::rand::thread_rng());
@@ -310,23 +337,27 @@ async fn main() -> Res<()> {
             let vault = compile(&owner, &agent, CAPACITY, now)?;
             let entries: Vec<UtxoEntry> = picked.iter().map(|u| u.utxo_entry.clone().into()).collect();
             let inputs: Vec<TransactionInput> =
-                picked.iter().map(|u| TransactionInput::new(u.outpoint.clone().into(), vec![], 0, 1)).collect();
+                picked.iter().map(|u| TransactionInput::new_with_compute_budget(u.outpoint.clone().into(), vec![], 0, CB_P2PK)).collect();
             let fee = FEE * picked.len() as u64;
-            let mut outputs = vec![TransactionOutput::new(FUND, vault_spk(&vault))];
+            // Genèse de la lignée (KIP-20) : identifiant calculé depuis la première entrée et la sortie du coffre.
+            let mut vault_out = TransactionOutput::new(FUND, vault_spk(&vault));
+            let cov = covenant_id(inputs[0].previous_outpoint, std::iter::once((0u32, &vault_out)));
+            vault_out.covenant = Some(CovenantBinding { authorizing_input: 0, covenant_id: cov });
+            let mut outputs = vec![vault_out];
             let change = total - FUND - fee;
             if change > 0 {
                 outputs.push(TransactionOutput::new(change, pay_to_address_script(&address(&owner))));
             }
-            let mut tx = Transaction::new(0, inputs, outputs, 0, Default::default(), 0, vec![]);
+            let mut tx = Transaction::new(1, inputs, outputs, 0, Default::default(), 0, vec![]);
             for i in 0..tx.inputs.len() {
                 let s = sign(&tx, &entries, i, &owner);
                 tx.inputs[i].signature_script = ScriptBuilder::new().add_data(&s)?.drain();
             }
             tx.finalize();
             let txid = c.submit_transaction((&tx).into(), false).await?;
-            println!("Coffre déployé : {} TKAS, budget {} TKAS", FUND as f64 / 1e8, CAPACITY as f64 / 1e8);
+            println!("Coffre déployé : {} TKAS, budget {} TKAS, lignée {}", FUND as f64 / 1e8, CAPACITY as f64 / 1e8, cov);
             println!("Transaction : {}", explorer(&txid.to_string()));
-            save_state(&Etat { txid: txid.to_string(), index: 0, valeur: FUND, tokens: CAPACITY, last_daa: now })?;
+            save_state(&Etat { txid: txid.to_string(), index: 0, valeur: FUND, tokens: CAPACITY, last_daa: now, cov_id: cov.to_string() })?;
             c.disconnect().await?;
         }
         "payer" => {
@@ -338,7 +369,7 @@ async fn main() -> Res<()> {
             let elapsed = (now - e.last_daa).min(REFILL);
             let available = (e.tokens + elapsed * CAPACITY / REFILL).min(CAPACITY);
             println!("Budget disponible : {} TKAS, paiement demandé : {} TKAS", available as f64 / 1e8, amount as f64 / 1e8);
-            if !no_check && (amount > available || amount > MAX_PER_PAYMENT) {
+            if !no_check && (amount + FEE as i64 > available || amount > MAX_PER_PAYMENT) {
                 return Err("refusé localement : dépasse le budget ou le plafond par paiement (--sans-verif pour laisser le réseau trancher)".into());
             }
             let (tx, next_state) = build_pay(&owner, &agent, &e, amount, pay_to_address_script(&address(&service)), now)?;
@@ -358,11 +389,11 @@ async fn main() -> Res<()> {
             let e = load_state()?;
             let c = connect().await?;
             let vault = compile(&owner, &agent, e.tokens, e.last_daa)?;
-            let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, None);
+            let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, e.covenant().ok());
             let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
-            let input = TransactionInput::new(TransactionOutpoint::new(txid_in, e.index), vec![], 0, 1);
+            let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT);
             let outputs = vec![TransactionOutput::new(e.valeur - FEE, pay_to_address_script(&address(&owner)))];
-            let mut tx = Transaction::new(0, vec![input], outputs, 0, Default::default(), 0, vec![]);
+            let mut tx = Transaction::new(1, vec![input], outputs, 0, Default::default(), 0, vec![]);
             let s = sign(&tx, &[entry], 0, &owner);
             tx.inputs[0].signature_script = vault_sigscript(&vault, "ownerControl", &[s.into()])?;
             tx.finalize();
@@ -371,11 +402,66 @@ async fn main() -> Res<()> {
             fs::remove_file(state_path())?;
             c.disconnect().await?;
         }
+        "recharger" => {
+            // Le propriétaire ajoute des fonds au coffre en restant dans la même lignée (état inchangé).
+            let add: u64 = args.get(2).ok_or("montant en sompi manquant")?.parse()?;
+            let e = load_state()?;
+            let cov = e.covenant()?;
+            let c = connect().await?;
+            let vault = compile(&owner, &agent, e.tokens, e.last_daa)?;
+            let utxos = c.get_utxos_by_addresses(vec![address(&owner)]).await?;
+            let mut picked = vec![];
+            let mut total = 0u64;
+            for u in utxos.into_iter().take(20) {
+                total += u.utxo_entry.amount;
+                picked.push(u);
+                if total >= add + 3 * FEE {
+                    break;
+                }
+            }
+            let fee = FEE * (picked.len() as u64 + 1);
+            if total < add + fee {
+                return Err("solde du propriétaire insuffisant".into());
+            }
+            let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
+            let mut entries = vec![UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, Some(cov))];
+            let mut inputs = vec![TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT)];
+            for u in &picked {
+                entries.push(u.utxo_entry.clone().into());
+                inputs.push(TransactionInput::new_with_compute_budget(u.outpoint.clone().into(), vec![], 0, CB_P2PK));
+            }
+            let new_value = e.valeur + add;
+            let mut outputs = vec![TransactionOutput {
+                value: new_value,
+                script_public_key: vault_spk(&vault),
+                covenant: Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }),
+            }];
+            let change = total - add - fee;
+            if change > 0 {
+                outputs.push(TransactionOutput::new(change, pay_to_address_script(&address(&owner))));
+            }
+            let mut tx = Transaction::new(1, inputs, outputs, 0, Default::default(), 0, vec![]);
+            let s0 = sign(&tx, &entries, 0, &owner);
+            let ss0 = vault_sigscript(&vault, "ownerControl", &[s0.into()])?;
+            let mut sigs = vec![ss0];
+            for i in 1..tx.inputs.len() {
+                let s = sign(&tx, &entries, i, &owner);
+                sigs.push(ScriptBuilder::new().add_data(&s)?.drain());
+            }
+            for (i, ss) in sigs.into_iter().enumerate() {
+                tx.inputs[i].signature_script = ss;
+            }
+            tx.finalize();
+            let txid = c.submit_transaction((&tx).into(), false).await?;
+            println!("Coffre rechargé de {} TKAS (même lignée) : {}", add as f64 / 1e8, explorer(&txid.to_string()));
+            save_state(&Etat { txid: txid.to_string(), index: 0, valeur: new_value, ..e })?;
+            c.disconnect().await?;
+        }
         "demo-x402" => {
             x402::demo(&owner, &agent).await?;
         }
         _ => {
-            println!("Commandes : cles | adresses | etat | deployer | payer <sompi> [--sans-verif] | recuperer");
+            println!("Commandes : cles | adresses | etat | deployer | payer <sompi> [--sans-verif] | recharger <sompi> | recuperer | demo-x402");
         }
     }
     Ok(())

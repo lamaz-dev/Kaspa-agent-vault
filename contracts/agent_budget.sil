@@ -1,6 +1,6 @@
 pragma silverscript ^0.1.0;
 
-// AgentBudget v0.2 — coffre-fort de dépenses pour agent IA.
+// AgentBudget v0.3 — coffre-fort de dépenses pour agent IA.
 //
 // Règles garanties par le réseau Kaspa :
 //  - l'agent paie seul, dans la limite :
@@ -10,6 +10,10 @@ pragma silverscript ^0.1.0;
 //          refillPeriod = durée (en unités DAA, ~10 par seconde) pour recharger tout le budget
 //        Un budget non utilisé ne s'accumule jamais au-delà de `capacity`.
 //      * d'une liste blanche de destinataires, OPTIONNELLE (useAllowlist = 0 : tout destinataire).
+//    Les frais de transaction sont décomptés du budget (impossible de vider le coffre par les frais).
+//  - le coffre est une lignée unique suivie par le réseau (identifiant de covenant, KIP-20) :
+//    des fonds envoyés à la même adresse sans cette lignée ne sont pas dépensables par l'agent
+//    (ils restent récupérables par le propriétaire).
 //  - le propriétaire garde la main sur tout (dépense hors budget, récupération, changement de règles).
 //
 // Couloirs : pour permettre plusieurs paiements en parallèle, le propriétaire crée plusieurs
@@ -62,8 +66,6 @@ contract AgentBudget(
         if (available > capacity) {
             available = capacity;
         }
-        require(amount <= available);
-
         // Destinataire : libre, ou dans la liste blanche si elle est activée.
         if (useAllowlist != 0) {
             byte[32] payeeHash = blake2b(tx.outputs[0].scriptPubKey);
@@ -71,10 +73,17 @@ contract AgentBudget(
         }
         require(tx.outputs[0].value == amount);
 
-        // Le reste revient au couloir, avec le nouvel état.
+        // Dépense totale = montant + frais : c'est elle qui est décomptée du budget.
         int inputValue = tx.inputs[this.activeInputIndex].value;
-        require(tx.outputs[1].value >= inputValue - amount - maxFee);
-        validateOutputState(1, State { tokens: available - amount, lastDaa: nowDaa });
+        int spent = inputValue - tx.outputs[1].value;
+        require(spent >= amount);
+        require(spent - amount <= maxFee);
+        require(spent <= available);
+
+        // Lignée : la sortie 1 est la seule continuation de ce coffre (même identifiant de covenant).
+        require(OpAuthOutputCount(this.activeInputIndex) == 1);
+        require(OpAuthOutputIdx(this.activeInputIndex, 0) == 1);
+        validateOutputState(1, State { tokens: available - spent, lastDaa: nowDaa });
     }
 
     // Le propriétaire garde la main sur tout.
