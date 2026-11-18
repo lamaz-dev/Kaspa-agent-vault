@@ -347,3 +347,76 @@ Solde du propriétaire : 1483.21 TKAS (2 UTXO)
 Coffre : 4.305 TKAS, budget disponible ~1.51533332 TKAS (sortie df82ec4a5002f4780ee6b34912a174c8fe53593d9dce096357e9200e5c33d1cc:1)
 
 ```
+
+## 2026-11-18 17:11 UTC
+
+```
+$ vault-cli etat
+Connecté au testnet-10 : wss://alpha-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626873860
+Solde du propriétaire : 1483.21 TKAS (2 UTXO)
+Coffre : 4.305 TKAS, budget disponible ~2 TKAS (sortie df82ec4a5002f4780ee6b34912a174c8fe53593d9dce096357e9200e5c33d1cc:1)
+
+$ vault-cli sequestre-ouvrir 30000000 GET:/meteo-kaspa/commande-3
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Commande « GET:/meteo-kaspa/commande-3 » : 0.3 TKAS mis en séquestre, délai 600 blocs (~60 s), contrat de 242 octets
+Séquestre ouvert depuis le coffre : https://tn10.kaspa.stream/transactions/4df7a2659a0f62fc96ea037d01891c9aae18458ad48a9ffcd902e2d7fc097cef
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli sequestre-reclamer Meteo-Kaspa:10-blocs/s
+Vérificateur : preuve de livraison pour « GET:/meteo-kaspa/commande-3 » : résultat 5e9c3c77ae88f319
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Vendeur payé contre preuve de livraison : https://tn10.kaspa.stream/transactions/0897a9588735a2ae4b3fdbe3b55f94c209676d5b3c7477756c14863245d3f5e7
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli demo-x402
+Vendeur de démo sur http://127.0.0.1:8402, paiements reçus sur kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+
+=== Scénario 1 : achat normal, payé directement depuis le coffre ===
+
+[AGENT] GET http://127.0.0.1:8402/meteo-kaspa
+[VENDEUR] /meteo-kaspa : paiement requis (0.2 TKAS)
+[AGENT] 402 reçu : 0.2 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] autorisation valide : signée par la clé agent du coffre pour cette requête
+[VENDEUR] /meteo-kaspa : nœud : RPC Server (remote error) -> WebSocket -> WebSocket is not connected
+[AGENT] ❌ refusé par le vendeur : nœud : RPC Server (remote error) -> WebSocket -> WebSocket is not connected
+
+=== Scénario 2 : prix au-dessus du plafond, le vendeur refuse avant toute diffusion ===
+
+[AGENT] GET http://127.0.0.1:8402/rapport-premium
+[VENDEUR] /rapport-premium : paiement requis (1 TKAS)
+[AGENT] 402 reçu : 1 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] /rapport-premium : refusé avant diffusion : prix 1 TKAS > plafond par paiement du coffre (0.5 TKAS)
+[AGENT] ❌ refusé par le vendeur : refusé avant diffusion : prix 1 TKAS > plafond par paiement du coffre (0.5 TKAS)
+
+=== Scénario 3 : l'agent présente un faux coffre, le vendeur le démasque ===
+
+[AGENT] GET http://127.0.0.1:8402/meteo-kaspa
+[VENDEUR] /meteo-kaspa : paiement requis (0.2 TKAS)
+[AGENT] 402 reçu : 0.2 TKAS à payer à kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+[AGENT] (test) j'annonce un faux coffre avec un budget 100 fois plus grand
+[AGENT] paiement signé depuis le coffre, envoi au vendeur
+[VENDEUR] autorisation valide : signée par la clé agent du coffre pour cette requête
+[VENDEUR] /meteo-kaspa : coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne
+[AGENT] ❌ refusé par le vendeur : coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626875596
+Solde du propriétaire : 1483.21 TKAS (2 UTXO)
+Coffre : 3.99 TKAS, budget disponible ~1.78111111 TKAS (sortie 4df7a2659a0f62fc96ea037d01891c9aae18458ad48a9ffcd902e2d7fc097cef:1)
+
+```
