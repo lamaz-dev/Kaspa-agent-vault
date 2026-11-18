@@ -69,6 +69,6 @@ Chaque transaction est exécutée par le vrai moteur de script de Kaspa (`TxScri
 |---|---|---|
 | `coffre_moteur_egal_modele` | 256 séquences de 1 à 19 actions | 2 000 séquences, environ 16 000 transactions, aucune divergence |
 | `seul_le_proprietaire_ouvre_owner_control` | 256 | 2 000 |
-| `sequestre_moteur_egal_modele` (dont fusion de séquestres) | 128 | 2 000 (avant v0.2) |
+| `sequestre_moteur_egal_modele` (dont fusion de séquestres) | 128 | 2 000 sur la v0.2, aucune divergence |
 
 Campagne longue : `FUZZ_CASES=5000 cargo test --release fuzz` dans `cli/`.
