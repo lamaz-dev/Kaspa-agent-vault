@@ -1,0 +1,3 @@
+# Une commande par ligne. Pousser ce fichier lance l'exécution sur le testnet-10.
+adresses
+etat

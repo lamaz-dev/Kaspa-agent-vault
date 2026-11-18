@@ -1,24 +1,45 @@
 # kaspa-agent-vault
 
-Coffre de dépenses pour agents IA sur Kaspa : l'agent paie seul ses services,
-mais ne peut jamais dépasser le budget fixé par son propriétaire. La limite est imposée
-par le réseau Kaspa (covenant SilverScript), pas par un logiciel.
+Coffre de dépenses pour agents IA sur Kaspa : l'agent paie seul ses services, mais ne peut
+jamais dépasser le budget fixé par son propriétaire. La limite est imposée par le réseau
+Kaspa (covenant SilverScript), pas par un logiciel.
 
-## État — v0.2 (prototype, non audité)
+## Architecture
 
-- Plafond par paiement, budget rechargé en continu et plafonné, liste blanche optionnelle.
-- Couloirs parallèles pour les paiements simultanés.
-- Contrôle total du propriétaire (dépense hors budget, récupération des fonds).
-- 16 tests réussis dans le moteur de script de Kaspa. Pas encore déployé sur testnet.
+```
+contracts/   le contrat AgentBudget (SilverScript), commenté en français
+tests/       16 tests du contrat dans le moteur de script de Kaspa
+cli/         outil en ligne de commande : déployer, payer, récupérer sur le testnet-10
+testnet/     commandes à exécuter (commande.txt), journal des résultats, état public du coffre
+.github/     exécution automatique sur le testnet via GitHub Actions
+```
 
-## Contenu
+Prévu : `sdk/` (bibliothèque pour brancher un agent), `mcp-server/` (connecteur pour agents IA),
+`demo-ui/` (démo web avec les transactions en direct).
 
-- `contrat/agent_budget.sil` — le contrat, commenté en français.
-- `tests/agent_budget_tests.rs` — les tests. Pour les lancer : copier ce fichier et `agent_budget.sil` dans
-  `silverscript/silverscript-lang/tests/` (dépôt kaspanet/silverscript), puis
-  `cargo test --release -p silverscript-lang --test agent_budget_tests`.
+## Le contrat (v0.2, prototype non audité)
+
+- Plafond par paiement et budget rechargé en continu, plafonné (pas d'accumulation).
+- Liste blanche de destinataires optionnelle.
+- Couloirs parallèles pour les paiements simultanés, impossibles à combiner.
+- Contrôle total du propriétaire : dépense hors budget, récupération des fonds.
+
+## Lancer les tests
+
+Copier `contracts/agent_budget.sil` et `tests/agent_budget_tests.rs` dans
+`silverscript/silverscript-lang/tests/` (dépôt kaspanet/silverscript), puis :
+`cargo test --release -p silverscript-lang --test agent_budget_tests`
+
+## Testnet-10
+
+Écrire les commandes dans `testnet/commande.txt` (`adresses`, `etat`, `deployer`,
+`payer <sompi>`, `recuperer`) et pousser : GitHub Actions les exécute et écrit le
+résultat dans `testnet/journal.md`. Les clés de test sont dérivées du secret
+`VAULT_PHRASE` du dépôt.
 
 ## Sécurité
 
-Ne jamais déposer de clé privée ou de phrase secrète dans ce dépôt.
-SilverScript n'a pas encore de version auditée : ne pas utiliser avec de vrais fonds.
+- Aucune clé, phrase secrète ou URL privée dans le dépôt : uniquement dans les secrets GitHub
+  ou des fichiers `.env` ignorés.
+- Clés dédiées à la démo, jamais réutilisées ailleurs.
+- SilverScript n'a pas encore de version auditée : ne pas utiliser avec de vrais fonds.
