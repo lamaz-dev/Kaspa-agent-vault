@@ -1,4 +1,8 @@
-# Prime aux bugs — AgentBudget v0.4 sur le testnet-10 (brouillon, pas encore annoncée)
+# Prime aux bugs — AgentBudget v0.4 sur le testnet-10
+
+> **Statut : revue publique ouverte, prime en attente de financement.** Aucun montant n'est promis
+> tant que le financement n'est pas acquis. Les signalements reçus dès maintenant sont crédités
+> au tableau d'honneur et deviennent éligibles à la prime, à date de signalement, dès son ouverture.
 
 ## Périmètre
 
@@ -38,12 +42,28 @@ La clé de l'agent pourra être publiée pour l'épreuve, afin de simuler un age
 
 ## Récompense
 
-À définir avant l'annonce (montant symbolique en KAS, mention dans le dépôt et sur Kaspa France).
-Une **réserve de divulgation** est prévue : une faille sérieuse signalée en privé, hors des
-conditions ci-dessus, peut aussi être récompensée.
+La prime sera financée par la demande de subvention déposée auprès de la communauté Kaspa, en
+même temps que l'audit externe. Elle ne sera annoncée qu'une fois les fonds disponibles. Grille
+prévue, payée en KAS sur le mainnet (les TKAS du coffre de test n'ont aucune valeur) :
+
+| Gravité | Exemple | Prime prévue |
+|---|---|---|
+| Critique | condition 1 : dépasser le budget, voler le capital du propriétaire | ≈ 300 $ en KAS |
+| Élevée | condition 2 : bloquer définitivement les fonds | ≈ 150 $ en KAS |
+| Moyenne | condition 3 : tromper la vérification du vendeur | ≈ 50 $ en KAS |
+
+Plafond total prévu : 500 $ sur 4 semaines après l'ouverture de la prime.
+
+En attendant : **tableau d'honneur** dans ce dépôt et sur Kaspa France pour tout signalement
+valide. Une **réserve de divulgation** est prévue : une faille sérieuse signalée en privé, hors
+des conditions ci-dessus, peut aussi être récompensée.
 
 Premier arrivé, premier servi : une même faille n'est récompensée qu'une fois. Délai de
 divulgation publique : 30 jours après le signalement, ou dès la correction publiée.
+
+## Tableau d'honneur
+
+*(aucun signalement pour l'instant)*
 
 ## Référence
 
