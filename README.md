@@ -63,3 +63,7 @@ résultat dans `testnet/journal.md`. Les clés de test sont dérivées du secret
   ou des fichiers `.env` ignorés.
 - Clés dédiées à la démo, jamais réutilisées ailleurs.
 - SilverScript n'a pas encore de version auditée : ne pas utiliser avec de vrais fonds.
+
+## Licence
+
+Le cœur ouvert (contrats SilverScript, spécifications `spec/`, outil de démonstration `cli/`) est publié sous licence ISC, la même que rusty-kaspa et SilverScript. Voir `LICENSE`.

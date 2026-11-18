@@ -3,6 +3,7 @@ name = "vault-cli"
 version = "0.2.0"
 edition = "2024"
 publish = false
+license = "ISC"
 
 [dependencies]
 silverscript-lang = { git = "https://github.com/kaspanet/silverscript", rev = "443d519e6688fa03d24c69432763b13e6abe4486" }
