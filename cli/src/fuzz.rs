@@ -272,6 +272,7 @@ proptest! {
         fee in prop_oneof![4 => 0i64..=sequestre::MAX_FEE, 1 => sequestre::MAX_FEE + 1..2 * sequestre::MAX_FEE],
         seq in prop_oneof![1 => 0u64..sequestre::DEFAULT_TIMEOUT as u64, 1 => sequestre::DEFAULT_TIMEOUT as u64..4 * sequestre::DEFAULT_TIMEOUT as u64],
         result in "[a-z]{0,24}",
+        extra_input in prop::bool::weighted(0.2),
     ) {
         let merchant = pay_to_address_script(&address(&k(3)));
         let refund = pay_to_address_script(&address(&k(1)));
@@ -290,9 +291,18 @@ proptest! {
             sequestre::build_refund(&a, &s, to, fee as u64).unwrap()
         };
         tx.inputs[0].sequence = if claim { 0 } else { seq };
-        let utxo = UtxoEntry::new(ESCROW_VALUE, pay_to_script_hash_script(&bytecode(&a)), 0, false, None);
-        let predicted = to_expected && fee <= sequestre::MAX_FEE
+        let mut utxos = vec![UtxoEntry::new(ESCROW_VALUE, pay_to_script_hash_script(&bytecode(&a)), 0, false, None)];
+        if extra_input {
+            // E5 : un second séquestre fusionné dans la même transaction (sa valeur partirait en frais).
+            let a2 = sequestre::artifact(&merchant, &refund, &verifier, "GET:/meteo/commande-9", sequestre::DEFAULT_TIMEOUT).unwrap();
+            let mut i2 = tx.inputs[0].clone();
+            i2.previous_outpoint = TransactionOutpoint::new(TransactionId::from_bytes([5; 32]), 0);
+            i2.signature_script = vault_sigscript(&a2, "refund", &[]).unwrap();
+            tx.inputs.push(i2);
+            utxos.push(UtxoEntry::new(ESCROW_VALUE, pay_to_script_hash_script(&bytecode(&a2)), 0, false, None));
+        }
+        let predicted = !extra_input && to_expected && fee <= sequestre::MAX_FEE
             && if claim { good_signer && same_request } else { seq >= sequestre::DEFAULT_TIMEOUT as u64 };
-        prop_assert_eq!(exec(&tx, vec![utxo]), predicted);
+        prop_assert_eq!(exec(&tx, utxos), predicted);
     }
 }

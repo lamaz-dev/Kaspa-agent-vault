@@ -7,7 +7,7 @@
 | Élément | Fichier | Taille | Statut |
 |---|---|---|---|
 | Coffre AgentBudget v0.4 | `contracts/agent_budget.sil` | 479 octets (paramètres de référence) | dans le périmètre |
-| Séquestre DeliveryEscrow v0.1 | `contracts/delivery_escrow.sil` | 234 octets | dans le périmètre |
+| Séquestre DeliveryEscrow v0.2 | `contracts/delivery_escrow.sil` | 242 octets | dans le périmètre |
 | Vérification côté vendeur (profil x402) | `cli/src/x402.rs`, fonction `verify_and_settle` | — | dans le périmètre (logiciel hors chaîne) |
 | Outil de démonstration | `cli/src/main.rs` | — | hors périmètre, sauf construction des transactions |
 
@@ -66,7 +66,7 @@ Utilisé pour récupérer le coffre (sortie unique vers le propriétaire), le re
 ### Réclamer un séquestre (vendeur, entrée `claim`)
 
 ```
-entrée  : [0] séquestre S, séquence 0, budget de calcul 15
+entrée  : [0] séquestre S, seule entrée (v0.2), séquence 0, budget de calcul 15
           signature : preuve = Schnorr(vérificateur, blake2b(requestHash ‖ resultHash)), resultHash
 sortie  : [0] S-F vers l'adresse du vendeur figée à la création, F ≤ maxFee
 ```
@@ -75,7 +75,7 @@ Pas de signature du vendeur : la destination est figée, n'importe qui peut diff
 ### Rembourser un séquestre (n'importe qui, entrée `refund`)
 
 ```
-entrée  : [0] séquestre S, séquence = timeoutDaa (verrou relatif), budget de calcul 5
+entrée  : [0] séquestre S, seule entrée (v0.2), séquence = timeoutDaa (verrou relatif), budget de calcul 5
 sortie  : [0] S-F vers l'adresse de remboursement figée à la création, F ≤ maxFee
 ```
 
@@ -96,7 +96,7 @@ sortie  : [0] S-F vers l'adresse de remboursement figée à la création, F ≤ 
 | Suite | Nombre | Commande |
 |---|---|---|
 | Contrat AgentBudget (moteur SilverScript) | 25 + mesure du budget de calcul | job `contrats` de la CI |
-| Séquestre DeliveryEscrow | 8 + mesure du budget de calcul | job `contrats` de la CI |
+| Séquestre DeliveryEscrow | 9 + mesure du budget de calcul | job `contrats` de la CI |
 | Masse KIP-9, séquestre, outil | 13 | `cd cli && cargo test --release` |
 | Fuzzing d'état | 4 (dont test de contrôle du banc) | idem ; campagne longue `FUZZ_CASES=5000` |
 | Essais réels sur testnet-10 | 8 essais | `testnet/journal.md` |

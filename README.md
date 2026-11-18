@@ -31,7 +31,7 @@ Prévu : `sdk/` (bibliothèque pour brancher un agent), `mcp-server/` (connecteu
 
 Modèle de menace : `spec/threat-model.md`. Prime aux bugs : `BUG-BOUNTY.md`.
 
-## Le séquestre DeliveryEscrow (v0.1, prototype)
+## Le séquestre DeliveryEscrow (v0.2, prototype)
 
 Paiement à la livraison : le vendeur n'est payé que contre une preuve de livraison signée par
 un vérificateur pour cette commande précise ; sans preuve dans le délai, l'argent revient au

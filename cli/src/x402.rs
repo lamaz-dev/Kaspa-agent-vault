@@ -96,35 +96,24 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
         return Err("type de paiement non pris en charge".into());
     }
 
-    // 1. Coffre authentique : recompilation à partir des paramètres publics.
+    // Ordre des contrôles (R12) : d'abord tout ce qui ne coûte rien (forme, prix, plafond,
+    // signature de l'agent), ensuite seulement la recompilation et les appels au nœud.
+
+    // a. Paramètres annoncés (lecture seule).
     let params: VaultParams = serde_json::from_value(p["vault"]["params"].clone()).map_err(|_| "paramètres du coffre invalides")?;
     let txid_in = p["vault"]["outpoint"]["txid"].as_str().ok_or("outpoint manquant")?;
     let index_in = p["vault"]["outpoint"]["index"].as_u64().ok_or("outpoint manquant")? as u32;
     if Some(params.asset.as_str()) != pl["accepted"]["asset"].as_str() {
         return Err("la monnaie du coffre ne correspond pas à celle de l'offre".into());
     }
-    let spk = cached_spk(&params)?;
-    let vault_addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
-    let utxos = rpc.get_utxos_by_addresses(vec![vault_addr]).await.map_err(|e| format!("nœud : {e}"))?;
-    let on_chain = utxos.iter().find(|u| u.outpoint.transaction_id.to_string() == txid_in && u.outpoint.index == index_in);
-    let Some(vault_utxo) = on_chain else {
-        return Err("coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne".into());
-    };
-    let Some(lineage) = vault_utxo.utxo_entry.covenant_id else {
-        return Err("fonds hors lignée : cette sortie n'appartient à aucun coffre (identifiant de covenant absent)".into());
-    };
-    println!(
-        "[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain ({} TKAS), lignée {}",
-        vault_utxo.utxo_entry.amount as f64 / 1e8,
-        lineage
-    );
-
-    // 3. Transaction : dépense bien ce coffre et paie exactement le prix au vendeur.
+    // b. Transaction : dépense bien ce coffre et paie exactement le prix au vendeur.
     let tx_bytes = hex::decode(p["transaction"].as_str().ok_or("transaction manquante")?).map_err(|_| "transaction illisible")?;
     let mut tx: Transaction = borsh::from_slice(&tx_bytes).map_err(|_| "transaction non décodable")?;
     tx.finalize();
     let txid = tx.id().to_string();
-    let expected_in = TransactionOutpoint::new(TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(txid_in).unwrap().as_slice()).unwrap()), index_in);
+    // Entrée fournie par le client : aucune conversion ne doit pouvoir faire planter le serveur.
+    let txid_bytes: [u8; 32] = hex::decode(txid_in).ok().and_then(|v| v.try_into().ok()).ok_or("outpoint invalide")?;
+    let expected_in = TransactionOutpoint::new(TransactionId::from_bytes(txid_bytes), index_in);
     if tx.inputs.len() != 1 || tx.inputs[0].previous_outpoint != expected_in || tx.outputs.len() != 2 {
         return Err("transaction mal formée pour ce profil".into());
     }
@@ -132,9 +121,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
         return Err("la sortie 0 ne paie pas exactement le prix au vendeur".into());
     }
 
-    // 2. Solvabilité et plafond, avant toute diffusion.
-    let now = (rpc.get_block_dag_info().await.map_err(|e| format!("nœud : {e}"))?.virtual_daa_score - 100) as i64;
-    let available = params.available(now);
+    // c. Plafond par paiement inscrit dans le coffre.
     let price = offer.price as i64;
     if price > params.max_per_payment {
         return Err(format!(
@@ -143,16 +130,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
             params.max_per_payment as f64 / 1e8
         ));
     }
-    let spent = vault_utxo.utxo_entry.amount as i64 - tx.outputs[1].value as i64; // prix + frais
-    if spent - price > params.max_fee || spent < price {
-        return Err("frais de la transaction hors des limites du coffre".into());
-    }
-    if spent > available {
-        return Err(format!("refusé avant diffusion : budget restant du coffre {} TKAS < prix + frais", available as f64 / 1e8));
-    }
-    println!("[VENDEUR] solvable : budget restant {} TKAS ≥ prix {} TKAS", available as f64 / 1e8, price as f64 / 1e8);
-
-    // 4. Autorisation de la requête par la clé agent inscrite dans le coffre.
+    // c bis. Autorisation de la requête par la clé agent inscrite dans le coffre.
     let a = &p["authorization"];
     let expires = a["expiresAt"].as_u64().ok_or("expiration manquante")?;
     if expires < now_unix() {
@@ -170,7 +148,37 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
         .map_err(|_| "autorisation : signature de l'agent invalide")?;
     println!("[VENDEUR] autorisation valide : signée par la clé agent du coffre pour cette requête");
 
-    // 5. Diffusion puis attente de l'acceptation par le réseau.
+    // d. Coffre authentique : recompilation (mise en cache) puis présence sur la chaîne, à chaque requête.
+    let spk = cached_spk(&params)?;
+    let vault_addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
+    let utxos = rpc.get_utxos_by_addresses(vec![vault_addr]).await.map_err(|e| format!("nœud : {e}"))?;
+    let on_chain = utxos.iter().find(|u| u.outpoint.transaction_id.to_string() == txid_in && u.outpoint.index == index_in);
+    let Some(vault_utxo) = on_chain else {
+        return Err("coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne".into());
+    };
+    let Some(lineage) = vault_utxo.utxo_entry.covenant_id else {
+        return Err("fonds hors lignée : cette sortie n'appartient à aucun coffre (identifiant de covenant absent)".into());
+    };
+    println!(
+        "[VENDEUR] coffre authentique : script AgentBudget recompilé = sortie on-chain ({} TKAS), lignée {}",
+        vault_utxo.utxo_entry.amount as f64 / 1e8,
+        lineage
+    );
+
+    // e. Solvabilité, avant toute diffusion.
+    let price = offer.price as i64;
+    let now = (rpc.get_block_dag_info().await.map_err(|e| format!("nœud : {e}"))?.virtual_daa_score - 100) as i64;
+    let available = params.available(now);
+    let spent = vault_utxo.utxo_entry.amount as i64 - tx.outputs[1].value as i64; // prix + frais
+    if spent - price > params.max_fee || spent < price {
+        return Err("frais de la transaction hors des limites du coffre".into());
+    }
+    if spent > available {
+        return Err(format!("refusé avant diffusion : budget restant du coffre {} TKAS < prix + frais", available as f64 / 1e8));
+    }
+    println!("[VENDEUR] solvable : budget restant {} TKAS ≥ prix {} TKAS", available as f64 / 1e8, price as f64 / 1e8);
+
+    // f. Diffusion puis attente de l'acceptation par le réseau.
     rpc.submit_transaction((&tx).into(), false).await.map_err(|e| format!("rejetée par le réseau : {e}"))?;
     for _ in 0..30 {
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -1,6 +1,10 @@
 pragma silverscript ^0.1.0;
 
-// DeliveryEscrow v0.1 — paiement à la livraison pour agent IA.
+// DeliveryEscrow v0.2 — paiement à la livraison pour agent IA.
+//
+// v0.2 : une seule entrée imposée. Sans cette règle, deux séquestres pouvaient être fusionnés
+// dans une même transaction dont l'unique sortie ne vaut qu'un séquestre : l'autre partait en
+// frais chez le mineur (attaque possible par n'importe qui, aucune signature n'étant demandée).
 //
 // L'agent paie depuis son coffre AgentBudget vers ce séquestre au lieu de payer le vendeur.
 //  - claim  : le vendeur est payé SEULEMENT si un vérificateur a signé la preuve de livraison
@@ -21,6 +25,7 @@ contract DeliveryEscrow(
     entry claim(datasig proof, byte[32] resultHash) {
         byte[] message = byte[](requestHash) + byte[](resultHash);
         require(checkMsgSig(proof, blake2b(message), verifierKey));
+        require(tx.inputs.length == 1);
         require(tx.outputs.length == 1);
         require(blake2b(tx.outputs[0].scriptPubKey) == merchantSpkHash);
         require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - maxFee);
@@ -29,6 +34,7 @@ contract DeliveryEscrow(
     // Pas de preuve dans le délai : remboursement au propriétaire.
     entry refund() {
         require(this.ageDaa >= timeoutDaa);
+        require(tx.inputs.length == 1);
         require(tx.outputs.length == 1);
         require(blake2b(tx.outputs[0].scriptPubKey) == refundSpkHash);
         require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - maxFee);

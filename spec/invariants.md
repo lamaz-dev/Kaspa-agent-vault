@@ -1,4 +1,4 @@
-# Invariants du coffre AgentBudget v0.4 et du séquestre DeliveryEscrow v0.1
+# Invariants du coffre AgentBudget v0.4 et du séquestre DeliveryEscrow v0.2
 
 *Matrice destinée au pré-audit. Chaque invariant doit rester vrai après **n'importe quelle** transaction acceptée par le consensus Kaspa, y compris forgée par un agent totalement compromis. Colonne « Vérifié par » : tests unitaires ciblés ; les invariants I1 à I9 et I13, E1 à E4 sont en plus vérifiés par fuzzing d'état (section en fin de document). Preuve SMT : juste avant l'audit externe.*
 
@@ -35,6 +35,7 @@ Notations : `V` valeur de l'UTXO coffre dépensé, `V'` valeur de sa continuatio
 | E2 | Destination figée | `claim` → adresse du vendeur, `refund` → adresse de remboursement, une seule sortie | `preuve_valide_mais_argent_detourne_refuse`, `remboursement_vers_un_autre_refuse` |
 | E3 | Remboursement garanti | après `timeoutDaa` blocs, `refund` est toujours possible sans aucune signature | `remboursement_apres_delai`, `remboursement_avant_delai_refuse` |
 | E4 | Frais bornés | sortie ≥ valeur du séquestre − `maxFee` | `frais_excessifs_refuses` |
+| E5 | Pas de fusion (v0.2) | exactement une entrée : deux séquestres ne peuvent pas partager une sortie (l'un partirait en frais) | `fusion_de_deux_sequestres_refusee` (contrat et outil), fuzzing `sequestre_moteur_egal_modele` |
 
 Limite connue (R22) : après le délai, `claim` et `refund` restent tous deux possibles ; la première transaction acceptée gagne.
 
@@ -68,6 +69,6 @@ Chaque transaction est exécutée par le vrai moteur de script de Kaspa (`TxScri
 |---|---|---|
 | `coffre_moteur_egal_modele` | 256 séquences de 1 à 19 actions | 2 000 séquences, environ 16 000 transactions, aucune divergence |
 | `seul_le_proprietaire_ouvre_owner_control` | 256 | 2 000 |
-| `sequestre_moteur_egal_modele` | 128 | 2 000 |
+| `sequestre_moteur_egal_modele` (dont fusion de séquestres) | 128 | 2 000 (avant v0.2) |
 
 Campagne longue : `FUZZ_CASES=5000 cargo test --release fuzz` dans `cli/`.

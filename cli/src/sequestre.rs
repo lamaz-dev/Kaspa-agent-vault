@@ -103,14 +103,38 @@ mod tests {
 
     fn exec(tx: &Transaction, a: &SilAbiArtifact, value: u64) -> Result<(), String> {
         let utxo = UtxoEntry::new(value, pay_to_script_hash_script(&bytecode(a)), 0, false, None);
-        let populated = PopulatedTransaction::new(tx, vec![utxo]);
+        exec_at(tx, vec![utxo], 0)
+    }
+
+    fn exec_at(tx: &Transaction, utxos: Vec<UtxoEntry>, idx: usize) -> Result<(), String> {
+        let populated = PopulatedTransaction::new(tx, utxos);
         let cov = CovenantsContext::from_tx(&populated).unwrap();
         let cache = Cache::new(10);
         let reused = SigHashReusedValuesUnsync::new();
-        let input = populated.inputs()[0].clone();
-        let mut vm = TxScriptEngine::from_transaction_input(&populated, &input, 0, populated.utxo(0).unwrap(),
+        let input = populated.inputs()[idx].clone();
+        let mut vm = TxScriptEngine::from_transaction_input(&populated, &input, idx, populated.utxo(idx).unwrap(),
             EngineCtx::new(&cache).with_reused(&reused).with_covenants_ctx(&cov), EngineFlags::default());
         vm.execute().map_err(|e| format!("{e:?}"))
+    }
+
+    /// Deux séquestres échus fusionnés dans un seul remboursement : la sortie ne vaut qu'un séquestre,
+    /// l'autre partirait en frais chez le mineur. Chaque séquestre doit refuser une transaction à plusieurs entrées.
+    #[test]
+    fn fusion_de_deux_sequestres_refusee() {
+        let (merchant, refund, verifier, a1, s1) = setup();
+        let a2 = artifact(&merchant, &refund, &verifier, "GET:/meteo#2", DEFAULT_TIMEOUT).unwrap();
+        let mk = |b: u8| TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([b; 32]), 0), vec![], DEFAULT_TIMEOUT as u64, CB_REFUND);
+        let mut tx = Transaction::new(1, vec![mk(1), mk(2)], vec![TransactionOutput { value: s1.valeur - crate::FEE, script_public_key: refund.clone(), covenant: None }], 0, Default::default(), 0, vec![]);
+        tx.inputs[0].signature_script = crate::vault_sigscript(&a1, "refund", &[]).unwrap();
+        tx.inputs[1].signature_script = crate::vault_sigscript(&a2, "refund", &[]).unwrap();
+        let utxos = vec![
+            UtxoEntry::new(s1.valeur, pay_to_script_hash_script(&bytecode(&a1)), 0, false, None),
+            UtxoEntry::new(s1.valeur, pay_to_script_hash_script(&bytecode(&a2)), 0, false, None),
+        ];
+        let r0 = exec_at(&tx, utxos.clone(), 0);
+        let r1 = exec_at(&tx, utxos, 1);
+        eprintln!("entrée 0 : {r0:?}, entrée 1 : {r1:?}");
+        assert!(r0.is_err() && r1.is_err(), "fusion acceptée : un séquestre entier partirait en frais");
     }
 
     fn setup() -> (ScriptPublicKey, ScriptPublicKey, Keypair, SilAbiArtifact, Sequestre) {

@@ -183,3 +183,26 @@ fn mesure_budget_sequestre() {
         eprintln!("{entry}: {units} unités => budget minimal {}", units.div_ceil(SCRIPT_UNITS_PER_COMPUTE_BUDGET_UNIT));
     }
 }
+
+#[test]
+fn fusion_de_deux_sequestres_refusee() {
+    // v0.2 : deux séquestres dépensés ensemble vers une seule sortie qui ne vaut qu'un séquestre.
+    let c = ctx();
+    let e1 = compile(&c);
+    let c2 = Ctx { request: h(b"GET /meteo-kaspa #commande-43"), ..ctx() };
+    let e2 = compile(&c2);
+    let mk = |b: u8, e: &SilAbiArtifact| {
+        let mut i = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([b; 32]), 0), vec![], TIMEOUT as u64, 1000);
+        let mut ss = encode_entry_sig_script(e, "refund", &[]).unwrap();
+        ss.extend(push_redeem_script(&bytecode(e)));
+        i.signature_script = ss;
+        i
+    };
+    let tx = Transaction::new(1, vec![mk(1, &e1), mk(2, &e2)], vec![TransactionOutput { value: VALUE - FEE, script_public_key: c.owner.clone(), covenant: None }], 0, Default::default(), 0, vec![]);
+    let utxos = vec![
+        UtxoEntry::new(VALUE, pay_to_script_hash_script(&bytecode(&e1)), 0, false, None),
+        UtxoEntry::new(VALUE, pay_to_script_hash_script(&bytecode(&e2)), 0, false, None),
+    ];
+    assert!(execute_input_with_covenants(tx.clone(), utxos.clone(), 0).is_err());
+    assert!(execute_input_with_covenants(tx, utxos, 1).is_err());
+}
