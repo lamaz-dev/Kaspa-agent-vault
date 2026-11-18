@@ -1,0 +1,370 @@
+mod common;
+
+use blake2b_simd::Params;
+use kaspa_consensus_core::hashing::sighash::{SigHashReusedValuesUnsync, calc_schnorr_signature_hash};
+use kaspa_consensus_core::hashing::sighash_type::SIG_HASH_ALL;
+use kaspa_consensus_core::tx::{
+    PopulatedTransaction, ScriptPublicKey, Transaction, TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput,
+    UtxoEntry,
+};
+use kaspa_txscript::pay_to_script_hash_script;
+use kaspa_txscript_errors::TxScriptError;
+use secp256k1::{Keypair, Message};
+use silverscript_abi::{ArtifactValue, SilAbiArtifact};
+use silverscript_lang::compiler::CompileOptions;
+
+use common::{bytecode, compile_contract, encode_entry_sig_script, execute_input_with_covenants, push_redeem_script};
+
+const SOURCE: &str = include_str!("../../../contrat/agent_budget.sil");
+
+const CAPACITY: i64 = 2_000_000_000; // 20 KAS
+const REFILL: i64 = 6_048_000; // ~1 semaine à 10 DAA/s
+const MAX_FEE: i64 = 100_000;
+const VAULT_VALUE: u64 = 10_000_000_000; // 100 KAS dans le coffre
+
+fn kp(seed: u8) -> Keypair {
+    Keypair::from_seckey_slice(secp256k1::SECP256K1, &[seed; 32]).unwrap()
+}
+fn xonly(k: &Keypair) -> Vec<u8> {
+    k.x_only_public_key().0.serialize().to_vec()
+}
+fn p2pk(k: &Keypair) -> ScriptPublicKey {
+    let mut s = vec![0x20];
+    s.extend(xonly(k));
+    s.push(0xac); // OpCheckSig
+    ScriptPublicKey::new(0, s.into())
+}
+fn h(spk: &ScriptPublicKey) -> Vec<u8> {
+    let bytes: Vec<u8> = spk.version().to_be_bytes().into_iter().chain(spk.script().iter().copied()).collect();
+    Params::new().hash_length(32).hash(&bytes).as_bytes().to_vec()
+}
+
+struct Ctx {
+    owner: Keypair,
+    agent: Keypair,
+    payee: ScriptPublicKey,
+    payees: [Vec<u8>; 3],
+}
+
+fn ctx() -> Ctx {
+    let payee = p2pk(&kp(10));
+    Ctx { owner: kp(1), agent: kp(2), payees: [h(&payee), h(&p2pk(&kp(11))), h(&p2pk(&kp(12)))], payee }
+}
+
+/// Réglages d'un couloir.
+#[derive(Clone, Copy)]
+struct Cfg {
+    lane: i64,
+    max_per_payment: i64,
+    use_allowlist: i64,
+}
+const DEFAULT: Cfg = Cfg { lane: 0, max_per_payment: CAPACITY, use_allowlist: 1 };
+
+fn compile(c: &Ctx, tokens: i64, last: i64) -> SilAbiArtifact {
+    compile_cfg(c, DEFAULT, tokens, last)
+}
+
+fn compile_cfg(c: &Ctx, cfg: Cfg, tokens: i64, last: i64) -> SilAbiArtifact {
+    let args: Vec<ArtifactValue> = vec![
+        xonly(&c.owner).into(),
+        xonly(&c.agent).into(),
+        cfg.lane.into(),
+        CAPACITY.into(),
+        REFILL.into(),
+        cfg.max_per_payment.into(),
+        MAX_FEE.into(),
+        cfg.use_allowlist.into(),
+        c.payees[0].clone().into(),
+        c.payees[1].clone().into(),
+        c.payees[2].clone().into(),
+        tokens.into(),
+        last.into(),
+    ];
+    compile_contract(SOURCE, &args, CompileOptions::default()).expect("compile")
+}
+
+/// Construit et exécute une dépense du coffre.
+/// `outputs` : liste complète des sorties. `entry`/`args_fn` : point d'entrée et arguments (la signature est ajoutée en tête).
+fn run(
+    vault: &SilAbiArtifact,
+    outputs: Vec<TransactionOutput>,
+    lock_time: u64,
+    signer: &Keypair,
+    entry: &str,
+    extra_args: Vec<ArtifactValue>,
+) -> Result<(), TxScriptError> {
+    let input =
+        TransactionInput::new(TransactionOutpoint::new(TransactionId::from_bytes([7; 32]), 0), vec![], 0, 0);
+    let mut tx = Transaction::new(0, vec![input], outputs, lock_time, Default::default(), 0, vec![]);
+    let utxo = UtxoEntry::new(VAULT_VALUE, pay_to_script_hash_script(&bytecode(vault)), 0, false, None);
+
+    let reused = SigHashReusedValuesUnsync::new();
+    let populated = PopulatedTransaction::new(&tx, vec![utxo.clone()]);
+    let sighash = calc_schnorr_signature_hash(&populated, 0, SIG_HASH_ALL, &reused);
+    let sig = signer.sign_schnorr(Message::from_digest_slice(sighash.as_bytes().as_slice()).unwrap());
+    let mut sig_bytes = sig.as_ref().to_vec();
+    sig_bytes.push(SIG_HASH_ALL.to_u8());
+
+    let mut args: Vec<ArtifactValue> = vec![sig_bytes.into()];
+    args.extend(extra_args);
+    let mut sigscript = encode_entry_sig_script(vault, entry, &args).expect("sigscript");
+    sigscript.extend(push_redeem_script(&bytecode(vault)));
+    tx.inputs[0].signature_script = sigscript;
+    execute_input_with_covenants(tx, vec![utxo], 0)
+}
+
+fn out(value: u64, spk: ScriptPublicKey) -> TransactionOutput {
+    TransactionOutput { value, script_public_key: spk, covenant: None }
+}
+
+/// Paiement standard : `amount` vers `payee`, reste au coffre avec l'état attendu.
+fn pay(c: &Ctx, tokens: i64, last: i64, amount: i64, now: i64, next_tokens: i64) -> Result<(), TxScriptError> {
+    let vault = compile(c, tokens, last);
+    let next = compile(c, next_tokens, now);
+    let change = VAULT_VALUE - amount as u64 - 50_000;
+    run(
+        &vault,
+        vec![out(amount as u64, c.payee.clone()), out(change, pay_to_script_hash_script(&bytecode(&next)))],
+        now as u64,
+        &c.agent,
+        "pay",
+        vec![amount.into(), now.into()],
+    )
+}
+
+#[test]
+fn agent_peut_payer_dans_le_budget() {
+    let c = ctx();
+    // budget plein (20 KAS), paie 1 KAS
+    let r = pay(&c, CAPACITY, 1_000, 100_000_000, 1_000, CAPACITY - 100_000_000);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+#[test]
+fn agent_ne_peut_pas_depasser_le_budget() {
+    let c = ctx();
+    // il reste 1 KAS, tente 2 KAS sans temps écoulé
+    let r = pay(&c, 100_000_000, 1_000, 200_000_000, 1_000, 0);
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn le_budget_se_recharge_avec_le_temps() {
+    let c = ctx();
+    // budget à 0, la moitié de la période s'écoule => 10 KAS disponibles
+    let half = REFILL / 2;
+    let ok = pay(&c, 0, 1_000, 1_000_000_000, 1_000 + half, 0);
+    assert!(ok.is_ok(), "{ok:?}");
+    let ko = pay(&c, 0, 1_000, 1_000_000_001, 1_000 + half, 0);
+    eprintln!("refus attendu: {:?}", ko.as_ref().err()); assert!(ko.is_err());
+}
+
+#[test]
+fn le_budget_inutilise_ne_s_accumule_pas() {
+    let c = ctx();
+    // 10 périodes d'inactivité : le budget plafonne à 20 KAS, pas 200
+    let r = pay(&c, CAPACITY, 1_000, CAPACITY + 1, 1_000 + 10 * REFILL, 0);
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+    let ok = pay(&c, CAPACITY, 1_000, CAPACITY, 1_000 + 10 * REFILL, 0);
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn agent_ne_peut_pas_tricher_sur_l_etat() {
+    let c = ctx();
+    // paie 1 KAS mais déclare un budget restant plein
+    let r = pay(&c, CAPACITY, 1_000, 100_000_000, 1_000, CAPACITY);
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn agent_ne_peut_pas_annoncer_un_instant_futur() {
+    let c = ctx();
+    let vault = compile(&c, 0, 1_000);
+    let now = 1_000 + REFILL; // prétend qu'une semaine est passée…
+    let next = compile(&c, 0, now);
+    let r = run(
+        &vault,
+        vec![out(CAPACITY as u64, c.payee.clone()), out(VAULT_VALUE - CAPACITY as u64 - 50_000, pay_to_script_hash_script(&bytecode(&next)))],
+        2_000, // … mais la transaction n'est valable qu'à partir de DAA 2000
+        &c.agent,
+        "pay",
+        vec![CAPACITY.into(), now.into()],
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn destinataire_non_autorise_refuse() {
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let next = compile(&c, CAPACITY - 100_000_000, 1_000);
+    let r = run(
+        &vault,
+        vec![out(100_000_000, p2pk(&kp(99))), out(VAULT_VALUE - 100_000_000 - 50_000, pay_to_script_hash_script(&bytecode(&next)))],
+        1_000,
+        &c.agent,
+        "pay",
+        vec![100_000_000i64.into(), 1_000i64.into()],
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn agent_ne_peut_pas_detourner_le_reste() {
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let next = compile(&c, CAPACITY - 100_000_000, 1_000);
+    // le reste renvoyé au coffre est amputé de 50 KAS
+    let r = run(
+        &vault,
+        vec![out(100_000_000, c.payee.clone()), out(VAULT_VALUE - 100_000_000 - 5_000_000_000, pay_to_script_hash_script(&bytecode(&next)))],
+        1_000,
+        &c.agent,
+        "pay",
+        vec![100_000_000i64.into(), 1_000i64.into()],
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn sortie_supplementaire_refusee() {
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let next = compile(&c, CAPACITY - 100_000_000, 1_000);
+    let r = run(
+        &vault,
+        vec![
+            out(100_000_000, c.payee.clone()),
+            out(VAULT_VALUE - 100_000_000 - 50_000, pay_to_script_hash_script(&bytecode(&next))),
+            out(1_000, p2pk(&kp(99))),
+        ],
+        1_000,
+        &c.agent,
+        "pay",
+        vec![100_000_000i64.into(), 1_000i64.into()],
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn mauvaise_cle_refusee_pour_payer() {
+    let c = ctx();
+    let vault = compile(&c, CAPACITY, 1_000);
+    let next = compile(&c, CAPACITY - 100_000_000, 1_000);
+    let r = run(
+        &vault,
+        vec![out(100_000_000, c.payee.clone()), out(VAULT_VALUE - 100_000_000 - 50_000, pay_to_script_hash_script(&bytecode(&next)))],
+        1_000,
+        &kp(99),
+        "pay",
+        vec![100_000_000i64.into(), 1_000i64.into()],
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err()); assert!(r.is_err());
+}
+
+#[test]
+fn proprietaire_garde_la_main() {
+    let c = ctx();
+    let vault = compile(&c, 0, 1_000);
+    // le propriétaire récupère tout vers une adresse quelconque, budget épuisé ou non
+    let ok = run(&vault, vec![out(VAULT_VALUE - 50_000, p2pk(&kp(42)))], 0, &c.owner, "ownerControl", vec![]);
+    assert!(ok.is_ok(), "{ok:?}");
+    // l'agent ne peut pas utiliser ce chemin
+    let ko = run(&vault, vec![out(VAULT_VALUE - 50_000, p2pk(&kp(42)))], 0, &c.agent, "ownerControl", vec![]);
+    eprintln!("refus attendu: {:?}", ko.as_ref().err()); assert!(ko.is_err());
+}
+
+// ---------- v0.2 ----------
+
+/// Paiement simple de `amount` vers `payee` avec une configuration donnée.
+fn pay_cfg(c: &Ctx, cfg: Cfg, payee: ScriptPublicKey, amount: i64) -> Result<(), TxScriptError> {
+    let vault = compile_cfg(c, cfg, CAPACITY, 1_000);
+    let next = compile_cfg(c, cfg, CAPACITY - amount, 1_000);
+    run(
+        &vault,
+        vec![out(amount as u64, payee), out(VAULT_VALUE - amount as u64 - 50_000, pay_to_script_hash_script(&bytecode(&next)))],
+        1_000,
+        &c.agent,
+        "pay",
+        vec![amount.into(), 1_000i64.into()],
+    )
+}
+
+#[test]
+fn plafond_par_paiement_respecte() {
+    let c = ctx();
+    let cfg = Cfg { max_per_payment: 50_000_000, ..DEFAULT }; // 0,5 KAS max par paiement
+    let ok = pay_cfg(&c, cfg, c.payee.clone(), 50_000_000);
+    assert!(ok.is_ok(), "{ok:?}");
+    // budget disponible (20 KAS) mais paiement de 1 KAS > plafond
+    let ko = pay_cfg(&c, cfg, c.payee.clone(), 100_000_000);
+    eprintln!("refus attendu: {:?}", ko.as_ref().err());
+    assert!(ko.is_err());
+}
+
+#[test]
+fn liste_blanche_desactivee_tout_destinataire_accepte() {
+    let c = ctx();
+    let cfg = Cfg { use_allowlist: 0, ..DEFAULT };
+    let r = pay_cfg(&c, cfg, p2pk(&kp(99)), 100_000_000);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+#[test]
+fn liste_blanche_activee_inconnu_refuse() {
+    let c = ctx();
+    let r = pay_cfg(&c, DEFAULT, p2pk(&kp(99)), 100_000_000);
+    eprintln!("refus attendu: {:?}", r.as_ref().err());
+    assert!(r.is_err());
+}
+
+#[test]
+fn couloirs_independants() {
+    let c = ctx();
+    // couloir 0 épuisé, couloir 1 plein : le couloir 1 peut toujours payer
+    let lane0 = Cfg { lane: 0, ..DEFAULT };
+    let lane1 = Cfg { lane: 1, ..DEFAULT };
+    let a = compile_cfg(&c, lane0, 0, 1_000);
+    let b = compile_cfg(&c, lane1, CAPACITY, 1_000);
+    assert_ne!(bytecode(&a), bytecode(&b), "chaque couloir a son propre script");
+    let ok = pay_cfg(&c, lane1, c.payee.clone(), 100_000_000);
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn impossible_de_combiner_deux_couloirs() {
+    let c = ctx();
+    let lane0 = compile_cfg(&c, Cfg { lane: 0, ..DEFAULT }, CAPACITY, 1_000);
+    let lane1 = compile_cfg(&c, Cfg { lane: 1, ..DEFAULT }, CAPACITY, 1_000);
+    let next0 = compile_cfg(&c, Cfg { lane: 0, ..DEFAULT }, CAPACITY - 100_000_000, 1_000);
+    let mk_in = |b: u8| TransactionInput::new(TransactionOutpoint::new(TransactionId::from_bytes([b; 32]), 0), vec![], 0, 0);
+    // L'agent tente de vider le couloir 1 en le glissant dans une dépense du couloir 0
+    let mut tx = Transaction::new(
+        0,
+        vec![mk_in(7), mk_in(8)],
+        vec![
+            out(100_000_000, c.payee.clone()),
+            out(VAULT_VALUE - 100_000_000 - 50_000, pay_to_script_hash_script(&bytecode(&next0))),
+        ],
+        1_000,
+        Default::default(),
+        0,
+        vec![],
+    );
+    let utxos = vec![
+        UtxoEntry::new(VAULT_VALUE, pay_to_script_hash_script(&bytecode(&lane0)), 0, false, None),
+        UtxoEntry::new(VAULT_VALUE, pay_to_script_hash_script(&bytecode(&lane1)), 0, false, None),
+    ];
+    let reused = SigHashReusedValuesUnsync::new();
+    let populated = PopulatedTransaction::new(&tx, utxos.clone());
+    let sighash = calc_schnorr_signature_hash(&populated, 0, SIG_HASH_ALL, &reused);
+    let mut sig = c.agent.sign_schnorr(Message::from_digest_slice(sighash.as_bytes().as_slice()).unwrap()).as_ref().to_vec();
+    sig.push(SIG_HASH_ALL.to_u8());
+    let mut ss = encode_entry_sig_script(&lane0, "pay", &[sig.into(), 100_000_000i64.into(), 1_000i64.into()]).unwrap();
+    ss.extend(push_redeem_script(&bytecode(&lane0)));
+    tx.inputs[0].signature_script = ss;
+    let r = execute_input_with_covenants(tx, utxos, 0);
+    eprintln!("refus attendu: {:?}", r.as_ref().err());
+    assert!(r.is_err());
+}
