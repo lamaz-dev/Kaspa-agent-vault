@@ -11,6 +11,10 @@
 //!   deployer              crée le coffre (couloir 0) avec les fonds du propriétaire
 //!   payer <sompi> [--sans-verif]   l'agent paie le service depuis le coffre
 //!   recuperer             le propriétaire récupère tout le coffre
+//!   sequestre-ouvrir <sompi> <requete> [delai]   l'agent paie un séquestre de livraison (DeliveryEscrow)
+//!   sequestre-reclamer <resultat> [--fausse-preuve]   le vendeur encaisse contre la preuve du vérificateur
+//!   sequestre-rembourser  le propriétaire récupère le séquestre après le délai
+//!   payer ... --forcer-masse   désactive le refus local KIP-9 (pour observer le refus du réseau)
 
 use std::{env, fs, time::Duration};
 
@@ -33,6 +37,7 @@ use silverscript_abi::{ArtifactValue, SilAbiArtifact, encode_contract_entry_sig_
 use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_with_options};
 
 mod masse;
+mod sequestre;
 mod x402;
 
 const SOURCE: &str = include_str!("../../contracts/agent_budget.sil");
@@ -230,7 +235,7 @@ pub fn build_pay(
     let mut tx = Transaction::new(1, vec![input], outputs, now as u64, Default::default(), 0, vec![]);
     // Masse critique (KIP-9) : refuser localement ce que le mempool refuserait.
     if let Some(m) = masse::masses(&tx, std::slice::from_ref(&entry)) {
-        if !m.standard() {
+        if !m.standard() && !masse::FORCER.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(format!(
                 "paiement non diffusable : masse de stockage {} g > {} g (KIP-9). Paiement minimal ≈ 0,1 KAS ; un couloir sous ≈ 0,53 KAS ne peut plus payer, le propriétaire doit le recharger ou le vider.",
                 m.storage, masse::MAX_STANDARD_MASS
@@ -268,6 +273,8 @@ pub fn vault_sigscript(a: &SilAbiArtifact, entry: &str, args: &[ArtifactValue]) 
     ss.extend(ScriptBuilder::with_flags(EngineFlags::default()).add_data(&bytecode(a))?.drain());
     Ok(ss)
 }
+
+const SEQUESTRE: &str = "testnet/sequestre.json";
 
 fn state_path() -> String {
     env::var("ETAT").unwrap_or_else(|_| "testnet/etat-coffre.json".into())
@@ -335,6 +342,10 @@ async fn main() -> Res<()> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--forcer-masse") {
+        masse::FORCER.store(true, std::sync::atomic::Ordering::Relaxed);
+        println!("(refus local KIP-9 désactivé : le réseau tranchera)");
+    }
     let owner = keypair_from_env("OWNER_SK")?;
     let agent = keypair_from_env("AGENT_SK")?;
     let service = payee(&owner);
@@ -435,6 +446,79 @@ async fn main() -> Res<()> {
                     println!("Paiement REFUSÉ par le réseau : {err}");
                     std::process::exit(2);
                 }
+            }
+            c.disconnect().await?;
+        }
+        "sequestre-ouvrir" => {
+            let amount: i64 = args.get(2).ok_or("montant en sompi manquant")?.parse()?;
+            let requete = args.get(3).ok_or("requête manquante")?.clone();
+            let timeout: i64 = args.get(4).and_then(|a| a.parse().ok()).unwrap_or(sequestre::DEFAULT_TIMEOUT);
+            if fs::metadata(SEQUESTRE).is_ok() {
+                return Err("un séquestre est déjà ouvert".into());
+            }
+            let verifier = keypair_from_env("VERIFIER_SK")?;
+            let merchant = pay_to_address_script(&address(&service));
+            let refund = pay_to_address_script(&address(&owner));
+            let art = sequestre::artifact(&merchant, &refund, &verifier, &requete, timeout)?;
+            let escrow_spk = pay_to_script_hash_script(&bytecode(&art));
+            let e = load_state()?;
+            let c = connect().await?;
+            let now = ((virtual_daa(&c).await? - DAA_MARGIN) as i64).max(e.last_daa);
+            println!("Commande « {requete} » : {} TKAS mis en séquestre, délai {timeout} blocs (~{} s), contrat de {} octets",
+                amount as f64 / 1e8, timeout / 10, sequestre::script_size(&art));
+            let (tx, next_state) = build_pay(&owner, &agent, &e, amount, escrow_spk, now)?;
+            match c.submit_transaction((&tx).into(), false).await {
+                Ok(txid) => {
+                    println!("Séquestre ouvert depuis le coffre : {}", explorer(&txid.to_string()));
+                    save_state(&next_state)?;
+                    let s = sequestre::Sequestre { txid: txid.to_string(), index: 0, valeur: amount as u64, requete, timeout };
+                    fs::write(SEQUESTRE, serde_json::to_string_pretty(&s)?)?;
+                }
+                Err(err) => {
+                    println!("Séquestre REFUSÉ par le réseau : {err}");
+                    std::process::exit(2);
+                }
+            }
+            c.disconnect().await?;
+        }
+        "sequestre-reclamer" => {
+            let resultat = args.get(2).ok_or("résultat livré manquant")?.clone();
+            let fausse = args.iter().any(|a| a == "--fausse-preuve");
+            let s: sequestre::Sequestre = serde_json::from_str(&fs::read_to_string(SEQUESTRE).map_err(|_| "aucun séquestre ouvert")?)?;
+            let verifier = keypair_from_env("VERIFIER_SK")?;
+            let merchant = pay_to_address_script(&address(&service));
+            let refund = pay_to_address_script(&address(&owner));
+            let art = sequestre::artifact(&merchant, &refund, &verifier, &s.requete, s.timeout)?;
+            // Le vérificateur constate la livraison et signe ; en mode fraude, l'agent signe à sa place.
+            let signer = if fausse { &agent } else { &verifier };
+            let (proof, result_hash) = sequestre::proof(signer, &s.requete, &resultat);
+            println!("{} preuve de livraison pour « {} » : résultat {}",
+                if fausse { "(fraude) FAUSSE" } else { "Vérificateur :" }, s.requete, hex::encode(&result_hash[..8]));
+            let tx = sequestre::build_claim(&art, &s, merchant, FEE, proof, result_hash)?;
+            let c = connect().await?;
+            match c.submit_transaction((&tx).into(), false).await {
+                Ok(txid) => {
+                    println!("Vendeur payé contre preuve de livraison : {}", explorer(&txid.to_string()));
+                    fs::remove_file(SEQUESTRE)?;
+                }
+                Err(err) => println!("Réclamation REFUSÉE par le réseau : {err}"),
+            }
+            c.disconnect().await?;
+        }
+        "sequestre-rembourser" => {
+            let s: sequestre::Sequestre = serde_json::from_str(&fs::read_to_string(SEQUESTRE).map_err(|_| "aucun séquestre ouvert")?)?;
+            let verifier = keypair_from_env("VERIFIER_SK")?;
+            let merchant = pay_to_address_script(&address(&service));
+            let refund = pay_to_address_script(&address(&owner));
+            let art = sequestre::artifact(&merchant, &refund, &verifier, &s.requete, s.timeout)?;
+            let tx = sequestre::build_refund(&art, &s, refund, FEE)?;
+            let c = connect().await?;
+            match c.submit_transaction((&tx).into(), false).await {
+                Ok(txid) => {
+                    println!("Séquestre remboursé au propriétaire (pas de livraison) : {}", explorer(&txid.to_string()));
+                    fs::remove_file(SEQUESTRE)?;
+                }
+                Err(err) => println!("Remboursement REFUSÉ par le réseau : {err}"),
             }
             c.disconnect().await?;
         }

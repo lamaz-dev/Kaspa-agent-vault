@@ -148,3 +148,38 @@ fn remboursement_vers_un_autre_refuse() {
     eprintln!("refus attendu: {:?}", r.as_ref().err());
     assert!(r.is_err());
 }
+
+#[test]
+fn mesure_budget_sequestre() {
+    use kaspa_consensus_core::hashing::sighash::SigHashReusedValuesUnsync;
+    use kaspa_consensus_core::mass::units::SCRIPT_UNITS_PER_COMPUTE_BUDGET_UNIT;
+    use kaspa_consensus_core::tx::{PopulatedTransaction, VerifiableTransaction};
+    use kaspa_txscript::caches::Cache;
+    use kaspa_txscript::covenants::CovenantsContext;
+    use kaspa_txscript::{EngineCtx, EngineFlags, TxScriptEngine};
+    let c = ctx();
+    let e = compile(&c);
+    let result = h(b"resultat");
+    let pr = proof(&c.verifier, &c.request, &result);
+    for (seq, entry, args, to) in [
+        (0u64, "claim", vec![ArtifactValue::from(pr.clone()), result.clone().into()], c.merchant.clone()),
+        (TIMEOUT as u64, "refund", vec![], c.owner.clone()),
+    ] {
+        let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([9; 32]), 0), vec![], seq, 1000);
+        let mut tx = Transaction::new(1, vec![input], vec![TransactionOutput { value: VALUE - FEE, script_public_key: to, covenant: None }], 0, Default::default(), 0, vec![]);
+        let utxo = UtxoEntry::new(VALUE, pay_to_script_hash_script(&bytecode(&e)), 0, false, None);
+        let mut ss = encode_entry_sig_script(&e, entry, &args).unwrap();
+        ss.extend(push_redeem_script(&bytecode(&e)));
+        tx.inputs[0].signature_script = ss;
+        let populated = PopulatedTransaction::new(&tx, vec![utxo]);
+        let cov_ctx = CovenantsContext::from_tx(&populated).unwrap();
+        let cache = Cache::new(100);
+        let reused = SigHashReusedValuesUnsync::new();
+        let input = populated.inputs()[0].clone();
+        let mut vm = TxScriptEngine::from_transaction_input(&populated, &input, 0, populated.utxo(0).unwrap(),
+            EngineCtx::new(&cache).with_reused(&reused).with_covenants_ctx(&cov_ctx), EngineFlags::default());
+        vm.execute().expect("valide");
+        let units = vm.used_script_units().0;
+        eprintln!("{entry}: {units} unités => budget minimal {}", units.div_ceil(SCRIPT_UNITS_PER_COMPUTE_BUDGET_UNIT));
+    }
+}

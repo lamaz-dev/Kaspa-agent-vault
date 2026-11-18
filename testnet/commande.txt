@@ -1,13 +1,24 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 7 : v0.3 (frais dans le budget, lignée KIP-20)
+# essai 8 : v0.4, paiement à la livraison (DeliveryEscrow) et limite physique KIP-9
 deployer
 pause 15
 etat
-payer 30000000
+# Scénario A : livraison prouvée. Une fausse preuve est d abord refusée, puis le vendeur encaisse.
+sequestre-ouvrir 30000000 GET:/meteo-kaspa#commande-1
 pause 10
-payer 100000000 --sans-verif
-recharger 200000000
-pause 15
-etat
-demo-x402
+sequestre-reclamer Meteo-Kaspa:10-blocs/s --fausse-preuve
+sequestre-reclamer Meteo-Kaspa:10-blocs/s
+pause 10
+# Scénario B : pas de livraison. Remboursement refusé avant le délai, accepté après.
+sequestre-ouvrir 30000000 GET:/rapport#commande-2
+pause 10
+sequestre-rembourser
+pause 90
+sequestre-rembourser
+pause 10
+# Limite KIP-9 : 0,05 TKAS (200 000 g de stockage) puis 0,01 TKAS (1 000 000 g)
+payer 5000000 --sans-verif --forcer-masse
+pause 10
+payer 1000000 --sans-verif --forcer-masse
+pause 10
 etat

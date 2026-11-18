@@ -49,7 +49,7 @@ jobs:
               [ -z "$line" ] && continue
               cmd="${line%% *}"
               case "$cmd" in
-                adresses|etat|deployer|payer|recharger|recuperer|demo-x402|pause|masse) ;;
+                adresses|etat|deployer|payer|recharger|recuperer|demo-x402|pause|masse|sequestre-ouvrir|sequestre-reclamer|sequestre-rembourser) ;;
                 *) echo "commande refusée (hors liste blanche) : $cmd"; continue ;;
               esac
               echo "\$ vault-cli $line"
@@ -62,6 +62,6 @@ jobs:
         run: |
           git config user.name "vault-bot"
           git config user.email "vault-bot@users.noreply.github.com"
-          git add testnet/journal.md testnet/etat-coffre.json 2>/dev/null || git add testnet/journal.md
+          git add -A testnet/
           git commit -m "Journal testnet [skip ci]" || echo "rien à enregistrer"
           git push

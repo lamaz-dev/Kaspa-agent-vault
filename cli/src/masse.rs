@@ -9,6 +9,9 @@ use kaspa_consensus_core::config::params::TESTNET_PARAMS;
 use kaspa_consensus_core::mass::{MassCalculator, UtxoCell, calc_storage_mass, utxo_plurality};
 use kaspa_consensus_core::tx::{PopulatedTransaction, Transaction, UtxoEntry};
 
+/// Option `--forcer-masse` : laisser le réseau trancher au lieu de refuser localement.
+pub static FORCER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Masse maximale d'une transaction standard (politique du mempool).
 pub const MAX_STANDARD_MASS: u64 = 100_000;
 /// Paramètre C de KIP-9 (1 KAS × 10 000).
