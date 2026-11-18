@@ -260,3 +260,90 @@ Solde du propriétaire : 1487.94 TKAS (1 UTXO)
 Coffre : 6.47 TKAS, budget disponible ~1.55627777 TKAS (sortie 146d40a8b99aa5ad6336a81a72db6e822209bdcff074f48580da326181d721fe:1)
 
 ```
+
+## 2026-11-18 16:02 UTC
+
+```
+$ vault-cli deployer
+Connecté au testnet-10 : wss://proton-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh
+Coffre déployé : 5 TKAS, budget 2 TKAS, lignée b4f5c34ba99a8437a6169ed4583a903d613d8cf1e569cd12d276f47ca09cc768
+Transaction : https://tn10.kaspa.stream/transactions/cb48263fa213a51c615c6ea103076eb1846c5d59e0e742eebe448a1bb433a0b2
+
+$ vault-cli pause 15
+(pause de 15 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626825747
+Solde du propriétaire : 1482.925 TKAS (1 UTXO)
+Coffre : 5 TKAS, budget disponible ~2 TKAS (sortie cb48263fa213a51c615c6ea103076eb1846c5d59e0e742eebe448a1bb433a0b2:0)
+
+$ vault-cli sequestre-ouvrir 30000000 GET:/meteo-kaspa
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Commande « GET:/meteo-kaspa » : 0.3 TKAS mis en séquestre, délai 600 blocs (~60 s), contrat de 234 octets
+Séquestre ouvert depuis le coffre : https://tn10.kaspa.stream/transactions/3734213a847d85d129baf85fbe6e54cdaf242cf98419e12378fff3883701804b
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli sequestre-reclamer Meteo-Kaspa:10-blocs/s --fausse-preuve
+(fraude) FAUSSE preuve de livraison pour « GET:/meteo-kaspa » : résultat 5e9c3c77ae88f319
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Réclamation REFUSÉE par le réseau : RPC Server (remote error) -> Rejected transaction bf8f39647d8ac1f4e16fee9fac41a88329108f214ee4b0e8beeca9a72a6299e9: failed to verify the signature script: script ran, but verification failed
+
+$ vault-cli sequestre-reclamer Meteo-Kaspa:10-blocs/s
+Vérificateur : preuve de livraison pour « GET:/meteo-kaspa » : résultat 5e9c3c77ae88f319
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Vendeur payé contre preuve de livraison : https://tn10.kaspa.stream/transactions/bf8f39647d8ac1f4e16fee9fac41a88329108f214ee4b0e8beeca9a72a6299e9
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli sequestre-ouvrir 30000000 GET:/rapport
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Commande « GET:/rapport » : 0.3 TKAS mis en séquestre, délai 600 blocs (~60 s), contrat de 234 octets
+Séquestre ouvert depuis le coffre : https://tn10.kaspa.stream/transactions/a42a636ccddd343412c01864d875fb77dae6df360da36d12ea8f9f45ab74d288
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli sequestre-rembourser
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+Remboursement REFUSÉ par le réseau : RPC Server (remote error) -> Rejected transaction 847c5b54e6b7e420c923b4ae251fa8704ab9311554022e12dd3c7234a33d6740: one of the transaction sequence locks conditions was not met
+
+$ vault-cli pause 90
+(pause de 90 s)
+
+$ vault-cli sequestre-rembourser
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Séquestre remboursé au propriétaire (pas de livraison) : https://tn10.kaspa.stream/transactions/847c5b54e6b7e420c923b4ae251fa8704ab9311554022e12dd3c7234a33d6740
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli payer 5000000 --sans-verif --forcer-masse
+(refus local KIP-9 désactivé : le réseau tranchera)
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.5436111 TKAS, paiement demandé : 0.05 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/df82ec4a5002f4780ee6b34912a174c8fe53593d9dce096357e9200e5c33d1cc
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli payer 1000000 --sans-verif --forcer-masse
+(refus local KIP-9 désactivé : le réseau tranchera)
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.49599998 TKAS, paiement demandé : 0.01 TKAS
+Paiement REFUSÉ par le réseau : RPC Server (remote error) -> Rejected transaction 5e1ed0e1b8b832acfd6ba658d9b1a96d86554d7f45e3a6b77c7b13cf62752681: transaction storage mass of 1000055 is larger than max allowed size of 500000
+(code de sortie 2)
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626829751
+Solde du propriétaire : 1483.21 TKAS (2 UTXO)
+Coffre : 4.305 TKAS, budget disponible ~1.51533332 TKAS (sortie df82ec4a5002f4780ee6b34912a174c8fe53593d9dce096357e9200e5c33d1cc:1)
+
+```
