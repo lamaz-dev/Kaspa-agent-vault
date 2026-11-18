@@ -1,6 +1,6 @@
 # Invariants du coffre AgentBudget v0.4 et du séquestre DeliveryEscrow v0.1
 
-*Matrice destinée au pré-audit. Chaque invariant doit rester vrai après **n'importe quelle** transaction acceptée par le consensus Kaspa, y compris forgée par un agent totalement compromis. Colonne « Vérifié par » : tests actuels ; « Étape 2 » : tests à propriétés (proptest) et preuve SMT à venir.*
+*Matrice destinée au pré-audit. Chaque invariant doit rester vrai après **n'importe quelle** transaction acceptée par le consensus Kaspa, y compris forgée par un agent totalement compromis. Colonne « Vérifié par » : tests unitaires ciblés ; les invariants I1 à I9 et I13, E1 à E4 sont en plus vérifiés par fuzzing d'état (section en fin de document). Preuve SMT : juste avant l'audit externe.*
 
 Notations : `V` valeur de l'UTXO coffre dépensé, `V'` valeur de sa continuation, `B(t)` budget disponible à l'instant `t` = `min(capacity, tokens + min(t − lastDaa, refillPeriod) × capacity / refillPeriod)`.
 
@@ -46,3 +46,28 @@ Limite connue (R22) : après le délai, `claim` et `refund` restent tous deux po
 | P2 | Paiement minimal (KIP-9) | ≈ 0,02 KAS (limite réseau 500 000 g, observée sur testnet-10) | `micro_paiement_refuse_par_kip9`, `calcul_identique_au_reseau` |
 | P3 | Plancher de survie d'un couloir | ≈ 0,125 KAS | `plancher_de_survie` |
 | P4 | Arithmétique | entiers signés 64 bits ; `capacity × refillPeriod < 2^63` imposé à la création | `check_params` |
+
+## Fuzzing d'état (proptest)
+
+Fichier `cli/src/fuzz.rs`. Un modèle de référence d'une vingtaine de lignes prédit l'acceptation de chaque transaction ; `proptest` génère des séquences aléatoires (attentes, paiements honnêtes, montants et frais hors limites, instants passés) mêlées à 8 familles de triche :
+
+| Triche | Invariant visé |
+|---|---|
+| continuation qui annonce plus de jetons | I1, I4 |
+| dernier paiement antidaté (recharge gonflée) | I4, I7 |
+| continuation avec un plafond par paiement agrandi | I5 |
+| continuation sortie de la lignée (sans covenant) | I6 |
+| troisième sortie | I9 |
+| instant annoncé postérieur au verrou temporel | I7 |
+| signature d'une autre clé | I13 |
+| payload joint (instructions de bridge) | I10 |
+
+Chaque transaction est exécutée par le vrai moteur de script de Kaspa (`TxScriptEngine`, contexte de covenants). Toute divergence entre le moteur et le modèle fait échouer le test, et proptest réduit la séquence au plus petit contre-exemple. Un test de contrôle (`banc_de_test_discriminant`) vérifie que le banc accepte bien un paiement honnête, refuse chaque triche et tranche le budget au sompi près.
+
+| Test | Cas par défaut (CI) | Campagne longue du 18 novembre 2026 |
+|---|---|---|
+| `coffre_moteur_egal_modele` | 256 séquences de 1 à 19 actions | 2 000 séquences, environ 16 000 transactions, aucune divergence |
+| `seul_le_proprietaire_ouvre_owner_control` | 256 | 2 000 |
+| `sequestre_moteur_egal_modele` | 128 | 2 000 |
+
+Campagne longue : `FUZZ_CASES=5000 cargo test --release fuzz` dans `cli/`.

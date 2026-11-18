@@ -10,7 +10,7 @@ use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_wi
 
 use crate::{Res, bytecode, vault_sigscript, xonly};
 
-const SOURCE: &str = include_str!("../../contracts/delivery_escrow.sil");
+pub const SOURCE: &str = include_str!("../../contracts/delivery_escrow.sil");
 
 /// Délai minimal accepté par le vendeur (≈ 1 min à 10 blocs/s) : en dessous, le propriétaire
 /// pourrait se rembourser pendant que le vendeur livre (R22).

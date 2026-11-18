@@ -29,18 +29,22 @@ use kaspa_consensus_core::tx::{
     UtxoEntry,
 };
 use kaspa_txscript::script_builder::ScriptBuilder;
-use kaspa_txscript::{EngineFlags, pay_to_address_script, pay_to_script_hash_script};
+use kaspa_txscript::{EngineFlags, extract_script_pub_key_address, pay_to_address_script, pay_to_script_hash_script};
 use kaspa_wrpc_client::prelude::*;
 use secp256k1::{Keypair, Message};
 use serde::{Deserialize, Serialize};
 use silverscript_abi::{ArtifactValue, SilAbiArtifact, encode_contract_entry_sig_script};
 use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_with_options};
 
+#[cfg(test)]
+mod fuzz;
 mod masse;
 mod sequestre;
 mod x402;
 
 const SOURCE: &str = include_str!("../../contracts/agent_budget.sil");
+/// Révision exacte du compilateur SilverScript (doit correspondre à Cargo.toml).
+const SILVERSCRIPT_REV: &str = "443d519e6688fa03d24c69432763b13e6abe4486";
 
 // Réglages du coffre de test (en sompi : 1 KAS = 100 000 000 sompi).
 const CAPACITY: i64 = 200_000_000; // 2 TKAS de budget
@@ -178,6 +182,12 @@ pub fn check_params(p: &VaultParams) -> Res<()> {
 
 pub fn compile_params(p: &VaultParams) -> Res<SilAbiArtifact> {
     check_params(p)?;
+    compile_unchecked(p)
+}
+
+/// Compilation sans garde-fous : ce qu'un attaquant peut toujours faire de son côté.
+/// Réservée aux tests antagonistes ; l'outil et le vendeur passent par `compile_params`.
+pub fn compile_unchecked(p: &VaultParams) -> Res<SilAbiArtifact> {
     match p.asset.as_str() {
         ASSET_KAS => {}
         ASSET_KSD => return Err("monnaie KSD réservée : en attente du standard Kaspa Dollar".into()),
@@ -276,6 +286,30 @@ pub fn vault_sigscript(a: &SilAbiArtifact, entry: &str, args: &[ArtifactValue]) 
 
 const SEQUESTRE: &str = "testnet/sequestre.json";
 
+/// Empreintes reproductibles : sources, version du compilateur et bytecode de référence.
+/// Quiconque recompile le dépôt au même commit doit obtenir exactement ce texte (vérifié en CI).
+pub fn empreintes() -> Res<String> {
+    let b2 = |d: &[u8]| hex::encode(blake2b_simd::Params::new().hash_length(32).hash(d).as_bytes());
+    // Paramètres de référence publics : clés de test dérivées des octets 1 (propriétaire), 2 (agent),
+    // 3 (vendeur) et 7 (vérificateur), réglages du coffre de test.
+    let k = |b: u8| Keypair::from_seckey_slice(secp256k1::SECP256K1, &[b; 32]).unwrap();
+    let vault = compile_params(&VaultParams::ours(&k(1), &k(2), CAPACITY, 1_000_000))?;
+    let merchant = pay_to_address_script(&address(&k(3)));
+    let refund = pay_to_address_script(&address(&k(1)));
+    let escrow = sequestre::artifact(&merchant, &refund, &k(7), "GET:/meteo-kaspa/commande-1", sequestre::DEFAULT_TIMEOUT)?;
+    let mut r = String::new();
+    r.push_str("# Empreintes reproductibles (blake2b-256). Régénérer : vault-cli empreintes > contracts/EMPREINTES.txt\n");
+    r.push_str(&format!("compilateur silverscript : {}\n", SILVERSCRIPT_REV));
+    r.push_str(&format!("source agent_budget.sil : {}\n", b2(SOURCE.as_bytes())));
+    r.push_str(&format!("source delivery_escrow.sil : {}\n", b2(sequestre::SOURCE.as_bytes())));
+    for (name, a) in [("AgentBudget (paramètres de référence)", &vault), ("DeliveryEscrow (paramètres de référence)", &escrow)] {
+        let code = bytecode(a);
+        let addr = extract_script_pub_key_address(&pay_to_script_hash_script(&code), Prefix::Testnet)?;
+        r.push_str(&format!("{name} : {} octets, bytecode {}\n  adresse P2SH testnet : {addr}\n", code.len(), b2(&code)));
+    }
+    Ok(r)
+}
+
 fn state_path() -> String {
     env::var("ETAT").unwrap_or_else(|_| "testnet/etat-coffre.json".into())
 }
@@ -319,6 +353,11 @@ pub fn explorer(txid: &str) -> String {
 async fn main() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     let cmd = args.get(1).map(String::as_str).unwrap_or("aide");
+
+    if cmd == "empreintes" {
+        print!("{}", empreintes()?);
+        return Ok(());
+    }
 
     if cmd == "masse" {
         print!("{}", masse::rapport(FEE));

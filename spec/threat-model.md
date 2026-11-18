@@ -73,8 +73,8 @@ Parade côté propriétaire : récupérer le coffre (`recuperer`) ; la clé agen
 
 - Rafale x402 : 50 achats concurrents sur 5 couloirs (verrouillage local des UTXO côté agent, chaînage 0-conf sur la continuation, cache côté vendeur).
 - Réorganisation et éviction du mempool : 3 paiements chaînés en 0-conf dont le 2e est retardé ou rejeté.
-- Tests à propriétés (proptest) : séquences aléatoires de 200 actions, invariants vérifiés après chaque étape, réduction automatique du contre-exemple.
+- **Fait** : tests à propriétés (proptest), séquences aléatoires et 8 familles de triche contre le vrai moteur de script, 2 000 séquences sans divergence (spec/invariants.md).
 
-- Fuzzing des paramètres et des valeurs limites (montants nuls, négatifs, maximum, `refillPeriod` = 1).
+- **Fait en partie** : montants nuls, négatifs et au-delà du plafond, frais au-delà du plafond. Reste : paramètres extrêmes du coffre (`refillPeriod` = 1, capacité maximale).
 - Paiements concurrents sur un même couloir (R15).
 - Coffres dont les paramètres frôlent la limite de dépassement (R8).
