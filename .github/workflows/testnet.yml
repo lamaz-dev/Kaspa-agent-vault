@@ -19,7 +19,7 @@ jobs:
   run:
     # Seul le propriétaire du dépôt peut déclencher une exécution qui a accès au secret.
     # (Aucun déclencheur pull_request / pull_request_target : un fork ne voit jamais VAULT_PHRASE.)
-    if: github.actor == 'Filou-974' && github.repository == 'Filou-974/Kaspa-agent-vault'
+    if: github.actor == github.repository_owner && github.event.repository.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
