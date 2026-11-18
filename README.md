@@ -1,5 +1,12 @@
 # kaspa-agent-vault
 
+> ⚠️ **Prototype non audité, testnet-10 uniquement.** Ne déposez jamais de vrais KAS (mainnet) dans ces
+> contrats. Le code est en revue publique avant audit : voir [`SECURITY.md`](SECURITY.md) pour signaler une
+> faille en privé et [`BUG-BOUNTY.md`](BUG-BOUNTY.md) pour les règles.
+>
+> ⚠️ **Unaudited prototype, testnet-10 only.** Never deposit real (mainnet) KAS into these contracts.
+> Public review before audit: report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
+
 Coffre de dépenses pour agents IA sur Kaspa : l'agent paie seul ses services, mais ne peut
 jamais dépasser le budget fixé par son propriétaire. La limite est imposée par le réseau
 Kaspa (covenant SilverScript), pas par un logiciel.
@@ -8,7 +15,7 @@ Kaspa (covenant SilverScript), pas par un logiciel.
 
 ```
 contracts/   AgentBudget (coffre à budget) et DeliveryEscrow (paiement à la livraison), en SilverScript commenté
-tests/       23 tests du coffre + 8 tests du séquestre, dans le moteur de script de Kaspa
+tests/       25 tests du coffre + 10 du séquestre, dans le moteur de script de Kaspa (outil : 21 tests dont fuzzing d'état)
 cli/         outil en ligne de commande : déployer, payer, récupérer, démo x402 sur le testnet-10
 spec/        spécification du profil x402 « covenant-budget » (paiement direct depuis le coffre)
 testnet/     commandes à exécuter (commande.txt), journal des résultats, état public du coffre
