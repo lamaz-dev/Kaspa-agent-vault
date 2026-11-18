@@ -84,6 +84,24 @@ fn payment_required(url: &str, offer: &Offer, pay_to: &Address, error: &str) -> 
     B64.encode(pr.to_string())
 }
 
+/// Appel au nœud avec relances : un nœud public peut couper la connexion WebSocket un instant
+/// (observé sur testnet-10, essai 9). Lectures seulement ; la diffusion n'est jamais relancée ici.
+macro_rules! relance {
+    ($call:expr) => {{
+        let mut essai = 0;
+        loop {
+            match $call.await {
+                Ok(v) => break Ok(v),
+                Err(_) if essai < 3 => {
+                    essai += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                }
+                Err(e) => break Err(format!("nœud injoignable après {} essais : {e}", essai + 1)),
+            }
+        }
+    }};
+}
+
 /// Vérifie un paiement covenant-budget, le diffuse et attend son acceptation par le réseau.
 async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_to: &Address, payload_b64: &str) -> Result<Value, String> {
     let raw = B64.decode(payload_b64).map_err(|_| "en-tête PAYMENT-SIGNATURE illisible")?;
@@ -155,7 +173,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     // d. Coffre authentique : recompilation (mise en cache) puis présence sur la chaîne, à chaque requête.
     let spk = cached_spk(&params)?;
     let vault_addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
-    let utxos = rpc.get_utxos_by_addresses(vec![vault_addr]).await.map_err(|e| format!("nœud : {e}"))?;
+    let utxos = relance!(rpc.get_utxos_by_addresses(vec![vault_addr.clone()]))?;
     let on_chain = utxos.iter().find(|u| u.outpoint.transaction_id.to_string() == txid_in && u.outpoint.index == index_in);
     let Some(vault_utxo) = on_chain else {
         return Err("coffre non authentique : aucun coffre AgentBudget avec ces paramètres n'existe sur la chaîne".into());
@@ -171,7 +189,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
 
     // e. Solvabilité, avant toute diffusion.
     let price = offer.price as i64;
-    let now = (rpc.get_block_dag_info().await.map_err(|e| format!("nœud : {e}"))?.virtual_daa_score - 100) as i64;
+    let now = (relance!(rpc.get_block_dag_info())?.virtual_daa_score - 100) as i64;
     let available = params.available(now);
     let spent = vault_utxo.utxo_entry.amount as i64 - tx.outputs[1].value as i64; // prix + frais
     if spent - price > params.max_fee || spent < price {
@@ -186,7 +204,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     rpc.submit_transaction(crate::garde_diffusion(&tx).map_err(|e| e.to_string())?, false).await.map_err(|e| format!("rejetée par le réseau : {e}"))?;
     for _ in 0..30 {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let paid = rpc.get_utxos_by_addresses(vec![pay_to.clone()]).await.map_err(|e| format!("nœud : {e}"))?;
+        let paid = relance!(rpc.get_utxos_by_addresses(vec![pay_to.clone()]))?;
         if paid.iter().any(|u| u.outpoint.transaction_id.to_string() == txid && u.outpoint.index == 0) {
             println!("[VENDEUR] paiement accepté par le réseau : {}", explorer(&txid));
             return Ok(json!({

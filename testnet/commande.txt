@@ -1,10 +1,5 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 9 : séquestre v0.2 (une seule entrée), vendeur x402 réordonné, garde-fou de diffusion
-etat
-sequestre-ouvrir 30000000 GET:/meteo-kaspa/commande-3
-pause 10
-sequestre-reclamer Meteo-Kaspa:10-blocs/s
-pause 10
+# essai 10 : démo x402 avec relances des appels au nœud côté vendeur
 demo-x402
 pause 10
 etat
