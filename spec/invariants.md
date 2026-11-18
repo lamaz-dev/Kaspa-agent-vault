@@ -31,8 +31,8 @@ Notations : `V` valeur de l'UTXO coffre dépensé, `V'` valeur de sa continuatio
 
 | # | Invariant | Formulation | Vérifié par |
 |---|---|---|---|
-| E1 | Le vendeur n'est payé que contre preuve | `claim` exige une signature du vérificateur sur `blake2b(requestHash ‖ resultHash)` | `preuve_signee_par_un_autre_refusee`, `preuve_d_une_autre_commande_refusee` |
-| E2 | Destination figée | `claim` → adresse du vendeur, `refund` → adresse de remboursement, une seule sortie | tests de destination détournée |
+| E1 | Le vendeur n'est payé que contre preuve | `claim` exige une signature du vérificateur sur `blake2b(requestHash ‖ resultHash)` | `vendeur_paye_contre_preuve_de_livraison`, `preuve_signee_par_un_autre_refusee`, `preuve_d_une_autre_commande_refusee` |
+| E2 | Destination figée | `claim` → adresse du vendeur, `refund` → adresse de remboursement, une seule sortie | `preuve_valide_mais_argent_detourne_refuse`, `remboursement_vers_un_autre_refuse` |
 | E3 | Remboursement garanti | après `timeoutDaa` blocs, `refund` est toujours possible sans aucune signature | `remboursement_apres_delai`, `remboursement_avant_delai_refuse` |
 | E4 | Frais bornés | sortie ≥ valeur du séquestre − `maxFee` | `frais_excessifs_refuses` |
 
