@@ -14,3 +14,19 @@ Error: "VAULT_PHRASE trop courte (16 caractères minimum)"
 (code de sortie 1)
 
 ```
+
+## 2026-11-18 13:59 UTC
+
+```
+$ vault-cli adresses
+Propriétaire (à alimenter au faucet) : kaspatest:qqxetp2qx96n6u2p90recfdzqhgrcyrra9m3tqutglwc09e3kfz6us6tvxvuv
+Agent                                : kaspatest:qpxe4y9j78lagg26q4dq98daaq2j44t3zqugqy3tgraj0yvmm7xac2jwt9d7m
+Service payé par l'agent             : kaspatest:qqx5j2k4p60tgyh734me2xzg8dd8x8s5sfh744wsty9sktx2wpsxcjd8msm50
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626744395
+Solde du propriétaire : 0 TKAS (0 UTXO)
+Coffre : pas encore déployé
+
+```
