@@ -68,3 +68,46 @@ Solde du propriétaire : 1494.985 TKAS (1 UTXO)
 Coffre : 5 TKAS, budget disponible ~2 TKAS (sortie 93d64cf17505f4c3b0491a212f18952ecf0ae3bb4fc2ae5450383daa37b2140a:0)
 
 ```
+
+## 2026-11-18 14:21 UTC
+
+```
+$ vault-cli payer 30000000
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 2 TKAS, paiement demandé : 0.3 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/398a6851f76c02dc4da6cdf19261b7c3c8d9bff24d11889d994c3f905de0bc29
+
+$ vault-cli payer 100000000 --sans-verif
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.72144444 TKAS, paiement demandé : 1 TKAS
+Paiement REFUSÉ par le réseau : RPC Server (remote error) -> Rejected transaction 45607fdbf3502728250c1aa2e4cdeb1ad3355ec41db3fe4032d5d994ce6f8299: failed to verify the signature script: script ran, but verification failed
+(code de sortie 2)
+
+$ vault-cli payer 50000000
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.72255555 TKAS, paiement demandé : 0.5 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/3287b4c1dbedc2a37ec3ec260ef7143c5c0e54587d3027a1934f6bf2d00e2459
+
+$ vault-cli payer 50000000
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.22299999 TKAS, paiement demandé : 0.5 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/ea64df6fb13b2283ed68209b36cc9a75d559d25f4d2cad6b8be1aff26342f646
+
+$ vault-cli payer 50000000
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 0.72349999 TKAS, paiement demandé : 0.5 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/1607a240186c6b40193e833dd9de53157983d41f543f353bbd965f65b4ccbbb9
+
+$ vault-cli payer 50000000 --sans-verif
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 0.24738887 TKAS, paiement demandé : 0.5 TKAS
+Paiement REFUSÉ par le réseau : RPC Server (remote error) -> Rejected transaction e8e90f14f452d15cbd70cffef745baaa352da58caac714ae85825381972f203e: failed to verify the signature script: script ran, but verification failed
+(code de sortie 2)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626759490
+Solde du propriétaire : 1494.985 TKAS (1 UTXO)
+Coffre : 3.14 TKAS, budget disponible ~0.25827776 TKAS (sortie 1607a240186c6b40193e833dd9de53157983d41f543f353bbd965f65b4ccbbb9:1)
+
+```
