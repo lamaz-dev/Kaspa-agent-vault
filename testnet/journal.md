@@ -52,3 +52,19 @@ Solde du propriétaire : 1500 TKAS (1 UTXO)
 Coffre : pas encore déployé
 
 ```
+
+## 2026-11-18 14:11 UTC
+
+```
+$ vault-cli deployer
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Coffre déployé : 5 TKAS, budget 2 TKAS
+Transaction : https://tn10.kaspa.stream/transactions/93d64cf17505f4c3b0491a212f18952ecf0ae3bb4fc2ae5450383daa37b2140a
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 626751902
+Solde du propriétaire : 1494.985 TKAS (1 UTXO)
+Coffre : 5 TKAS, budget disponible ~2 TKAS (sortie 93d64cf17505f4c3b0491a212f18952ecf0ae3bb4fc2ae5450383daa37b2140a:0)
+
+```
