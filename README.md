@@ -9,7 +9,8 @@ Kaspa (covenant SilverScript), pas par un logiciel.
 ```
 contracts/   le contrat AgentBudget (SilverScript), commenté en français
 tests/       16 tests du contrat dans le moteur de script de Kaspa
-cli/         outil en ligne de commande : déployer, payer, récupérer sur le testnet-10
+cli/         outil en ligne de commande : déployer, payer, récupérer, démo x402 sur le testnet-10
+spec/        spécification du profil x402 « covenant-budget » (paiement direct depuis le coffre)
 testnet/     commandes à exécuter (commande.txt), journal des résultats, état public du coffre
 .github/     exécution automatique sur le testnet via GitHub Actions
 ```
@@ -23,6 +24,13 @@ Prévu : `sdk/` (bibliothèque pour brancher un agent), `mcp-server/` (connecteu
 - Liste blanche de destinataires optionnelle.
 - Couloirs parallèles pour les paiements simultanés, impossibles à combiner.
 - Contrôle total du propriétaire : dépense hors budget, récupération des fonds.
+
+## Profil x402 « covenant-budget »
+
+Un agent paie un service x402 directement depuis son coffre. Le vendeur vérifie que le
+coffre est authentique (recompilation du script), qu'il est solvable (budget lisible sur la
+chaîne) et que la clé agent du coffre a autorisé cette requête, avant toute diffusion.
+Démo : commande `demo-x402` (voir `testnet/journal.md`). Spécification : `spec/kaspa-covenant-budget-v0.md`.
 
 ## Lancer les tests
 
