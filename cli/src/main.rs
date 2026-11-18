@@ -310,6 +310,22 @@ pub fn empreintes() -> Res<String> {
     Ok(r)
 }
 
+/// Garde-fou bloquant avant toute diffusion : convertit la transaction au format RPC (l'objet
+/// réellement envoyé au nœud) et refuse si une entrée v1 y a perdu son budget de calcul.
+/// Dans rusty-kaspa 2.1.0, `RpcTransactionInput.compute_budget` vaut 0 par défaut en JSON : un
+/// aller-retour qui perd ce champ produirait une transaction rejetée (« script units exceeded »).
+pub fn garde_diffusion(tx: &Transaction) -> Res<kaspa_rpc_core::RpcTransaction> {
+    let rpc: kaspa_rpc_core::RpcTransaction = tx.into();
+    if tx.version >= 1 {
+        for (i, input) in rpc.inputs.iter().enumerate() {
+            if input.compute_budget == 0 {
+                return Err(format!("diffusion bloquée : budget de calcul nul sur l'entrée {i}").into());
+            }
+        }
+    }
+    Ok(rpc)
+}
+
 fn state_path() -> String {
     env::var("ETAT").unwrap_or_else(|_| "testnet/etat-coffre.json".into())
 }
@@ -457,7 +473,7 @@ async fn main() -> Res<()> {
                 tx.inputs[i].signature_script = ScriptBuilder::new().add_data(&s)?.drain();
             }
             tx.finalize();
-            let txid = c.submit_transaction((&tx).into(), false).await?;
+            let txid = c.submit_transaction(garde_diffusion(&tx)?, false).await?;
             println!("Coffre déployé : {} TKAS, budget {} TKAS, lignée {}", FUND as f64 / 1e8, CAPACITY as f64 / 1e8, cov);
             println!("Transaction : {}", explorer(&txid.to_string()));
             save_state(&Etat { txid: txid.to_string(), index: 0, valeur: FUND, tokens: CAPACITY, last_daa: now, cov_id: cov.to_string() })?;
@@ -476,7 +492,7 @@ async fn main() -> Res<()> {
                 return Err("refusé localement : dépasse le budget ou le plafond par paiement (--sans-verif pour laisser le réseau trancher)".into());
             }
             let (tx, next_state) = build_pay(&owner, &agent, &e, amount, pay_to_address_script(&address(&service)), now)?;
-            match c.submit_transaction((&tx).into(), false).await {
+            match c.submit_transaction(garde_diffusion(&tx)?, false).await {
                 Ok(txid) => {
                     println!("Paiement accepté par le réseau : {}", explorer(&txid.to_string()));
                     save_state(&next_state)?;
@@ -506,7 +522,7 @@ async fn main() -> Res<()> {
             println!("Commande « {requete} » : {} TKAS mis en séquestre, délai {timeout} blocs (~{} s), contrat de {} octets",
                 amount as f64 / 1e8, timeout / 10, sequestre::script_size(&art));
             let (tx, next_state) = build_pay(&owner, &agent, &e, amount, escrow_spk, now)?;
-            match c.submit_transaction((&tx).into(), false).await {
+            match c.submit_transaction(garde_diffusion(&tx)?, false).await {
                 Ok(txid) => {
                     println!("Séquestre ouvert depuis le coffre : {}", explorer(&txid.to_string()));
                     save_state(&next_state)?;
@@ -535,7 +551,7 @@ async fn main() -> Res<()> {
                 if fausse { "(fraude) FAUSSE" } else { "Vérificateur :" }, s.requete, hex::encode(&result_hash[..8]));
             let tx = sequestre::build_claim(&art, &s, merchant, FEE, proof, result_hash)?;
             let c = connect().await?;
-            match c.submit_transaction((&tx).into(), false).await {
+            match c.submit_transaction(garde_diffusion(&tx)?, false).await {
                 Ok(txid) => {
                     println!("Vendeur payé contre preuve de livraison : {}", explorer(&txid.to_string()));
                     fs::remove_file(SEQUESTRE)?;
@@ -552,7 +568,7 @@ async fn main() -> Res<()> {
             let art = sequestre::artifact(&merchant, &refund, &verifier, &s.requete, s.timeout)?;
             let tx = sequestre::build_refund(&art, &s, refund, FEE)?;
             let c = connect().await?;
-            match c.submit_transaction((&tx).into(), false).await {
+            match c.submit_transaction(garde_diffusion(&tx)?, false).await {
                 Ok(txid) => {
                     println!("Séquestre remboursé au propriétaire (pas de livraison) : {}", explorer(&txid.to_string()));
                     fs::remove_file(SEQUESTRE)?;
@@ -573,7 +589,7 @@ async fn main() -> Res<()> {
             let s = sign(&tx, &[entry], 0, &owner);
             tx.inputs[0].signature_script = vault_sigscript(&vault, "ownerControl", &[s.into()])?;
             tx.finalize();
-            let txid = c.submit_transaction((&tx).into(), false).await?;
+            let txid = c.submit_transaction(garde_diffusion(&tx)?, false).await?;
             println!("Coffre récupéré par le propriétaire : {}", explorer(&txid.to_string()));
             fs::remove_file(state_path())?;
             c.disconnect().await?;
@@ -628,7 +644,7 @@ async fn main() -> Res<()> {
                 tx.inputs[i].signature_script = ss;
             }
             tx.finalize();
-            let txid = c.submit_transaction((&tx).into(), false).await?;
+            let txid = c.submit_transaction(garde_diffusion(&tx)?, false).await?;
             println!("Coffre rechargé de {} TKAS (même lignée) : {}", add as f64 / 1e8, explorer(&txid.to_string()));
             save_state(&Etat { txid: txid.to_string(), index: 0, valeur: new_value, ..e })?;
             c.disconnect().await?;

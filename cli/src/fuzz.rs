@@ -90,6 +90,8 @@ enum Cheat {
     WrongKey,
     /// payload joint (instructions de bridge)
     Payload,
+    /// sortie de paiement rattachée à la lignée du coffre (deuxième coffre, état ambigu)
+    BindPayment,
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +111,7 @@ fn cheat() -> impl Strategy<Value = Cheat> {
         1 => (1i64..1_000).prop_map(Cheat::FutureNow),
         1 => Just(Cheat::WrongKey),
         1 => Just(Cheat::Payload),
+        1 => Just(Cheat::BindPayment),
     ]
 }
 
@@ -166,8 +169,9 @@ fn try_pay(m: &Model, amount: i64, fee: i64, back: i64, cheat: &Cheat) -> (bool,
     let entry = UtxoEntry::new(m.value, vault_spk(&cur), 0, false, Some(cov));
     let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([3; 32]), 0), vec![], 0, CB_VAULT);
     let binding = if matches!(cheat, Cheat::DropCovenant) { None } else { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) };
+    let pay_binding = if matches!(cheat, Cheat::BindPayment) { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) } else { None };
     let mut outputs = vec![
-        TransactionOutput::new(amount as u64, pay_to_address_script(&address(&k(10)))),
+        TransactionOutput { value: amount as u64, script_public_key: pay_to_address_script(&address(&k(10))), covenant: pay_binding },
         TransactionOutput { value: rest as u64, script_public_key: vault_spk(&next), covenant: binding },
     ];
     if let Cheat::ExtraOutput(v) = cheat {
@@ -199,6 +203,7 @@ fn banc_de_test_discriminant() {
         Cheat::FutureNow(1),
         Cheat::WrongKey,
         Cheat::Payload,
+        Cheat::BindPayment,
     ] {
         let (ok, _, _) = try_pay(&m, 10_000_000, 1_500_000, 0, &c);
         assert!(!ok, "triche acceptée : {c:?}");
@@ -305,4 +310,31 @@ proptest! {
             && if claim { good_signer && same_request } else { seq >= sequestre::DEFAULT_TIMEOUT as u64 };
         prop_assert_eq!(exec(&tx, utxos), predicted);
     }
+}
+
+// ---------------------------------------------------------------- diffusion
+
+/// Garde-fou : une entrée v1 sans budget de calcul n'est jamais diffusée.
+#[test]
+fn garde_bloque_un_budget_nul() {
+    let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([3; 32]), 0), vec![], 0, 0);
+    let tx = Transaction::new(1, vec![input], vec![TransactionOutput::new(1_000, pay_to_address_script(&address(&k(10))))], 0, Default::default(), 0, vec![]);
+    assert!(garde_diffusion(&tx).is_err());
+    let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([3; 32]), 0), vec![], 0, CB_VAULT);
+    let tx = Transaction::new(1, vec![input], vec![TransactionOutput::new(1_000, pay_to_address_script(&address(&k(10))))], 0, Default::default(), 0, vec![]);
+    assert_eq!(garde_diffusion(&tx).unwrap().inputs[0].compute_budget, CB_VAULT);
+}
+
+/// Le risque signalé existe bien : un JSON sans le champ `computeBudget` se relit avec un budget nul.
+#[test]
+fn json_sans_budget_relu_a_zero() {
+    let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([3; 32]), 0), vec![], 0, CB_VAULT);
+    let tx = Transaction::new(1, vec![input], vec![TransactionOutput::new(1_000, pay_to_address_script(&address(&k(10))))], 0, Default::default(), 0, vec![]);
+    let rpc = garde_diffusion(&tx).unwrap();
+    let mut v = serde_json::to_value(&rpc).unwrap();
+    let inp = v["inputs"][0].as_object_mut().unwrap();
+    let key = inp.keys().find(|k| k.to_lowercase().contains("budget")).cloned().expect("champ budget en JSON");
+    inp.remove(&key);
+    let back: kaspa_rpc_core::RpcTransaction = serde_json::from_value(v).unwrap();
+    assert_eq!(back.inputs[0].compute_budget, 0, "le champ manquant est relu à 0");
 }

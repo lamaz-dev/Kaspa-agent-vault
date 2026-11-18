@@ -103,7 +103,21 @@ sortie  : [0] S-F vers l'adresse de remboursement figée à la création, F ≤ 
 
 Couverture de branches du code de vérification du vendeur (`cargo llvm-cov`) : à produire avant le gel du code.
 
-## 6. Questions ouvertes pour l'auditeur
+## 6. Points de veille vérifiés (18 novembre 2026)
+
+Signalements reçus sur l'activité récente de l'écosystème. Les numéros d'issue cités n'ont pas pu être consultés depuis notre environnement ; chaque comportement a donc été vérifié directement.
+
+| Point | Vérification | Résultat |
+|---|---|---|
+| Budget de calcul remis à 0 lors d'une sérialisation JSON | Code de `kaspa-rpc-core` 2.1.0 : `compute_budget` porte `#[serde(default)]` ; test `json_sans_budget_relu_a_zero` | Risque réel pour les SDK passant par JSON. Notre chemin borsh conserve le champ (8 essais acceptés sur testnet). Garde-fou bloquant ajouté (R31) |
+| Une seule entrée sur les chemins de dépense sans le propriétaire | Sources des contrats | `pay` (coffre), `claim` et `refund` (séquestre v0.2) imposent `tx.inputs.length == 1` ; `ownerControl` accepte plusieurs entrées pour l'apport de frais (I12) |
+| Dérivation de l'identifiant de covenant (KIP-20) | Identifiants calculés avec `covenant_id` de rusty-kaspa 2.1.0 | Deux genèses acceptées par le testnet-10 (lignées `7bbbb1a7…` et `b4f5c34b…`) : alignement constaté avec le nœud. À revérifier à chaque mise à jour de KIP-20 |
+| Éviction d'un paiement non confirmé par une transaction du propriétaire | R15 | Le vendeur livre après acceptation et ne garde aucune réservation |
+| Sortie de paiement détournée en état ambigu | Fuzzing, triche `BindPayment` | Refusée par le script (R32). Sans liste blanche, payer n'importe quel script standard reste un usage légitime du budget |
+
+Référence : guide officiel Toccata, https://docs.kaspa.org/toccata (tarification des scripts, identifiants de covenant).
+
+## 7. Questions ouvertes pour l'auditeur
 
 1. Le calcul `elapsed * capacity / refillPeriod` arrondit à l'inférieur : la perte d'arrondi peut-elle être exploitée en paiements très rapprochés ? (le budget ne peut que perdre, jamais gagner, selon nos tests)
 2. Course `claim` / `refund` après le délai (R22) : la parade côté vendeur (réclamer dès la preuve, délai minimal 600 blocs) est-elle suffisante ?

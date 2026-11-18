@@ -117,6 +117,10 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     if tx.inputs.len() != 1 || tx.inputs[0].previous_outpoint != expected_in || tx.outputs.len() != 2 {
         return Err("transaction mal formée pour ce profil".into());
     }
+    // Budget de calcul de l'entrée du coffre : au moins ce que coûte un paiement (11 unités mesurées).
+    if tx.inputs[0].compute_commit.compute_budget().unwrap_or(0) < 11 {
+        return Err("budget de calcul de l'entrée insuffisant pour un paiement depuis le coffre".into());
+    }
     if tx.outputs[0].script_public_key != pay_to_address_script(pay_to) || tx.outputs[0].value != offer.price {
         return Err("la sortie 0 ne paie pas exactement le prix au vendeur".into());
     }
@@ -179,7 +183,7 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     println!("[VENDEUR] solvable : budget restant {} TKAS ≥ prix {} TKAS", available as f64 / 1e8, price as f64 / 1e8);
 
     // f. Diffusion puis attente de l'acceptation par le réseau.
-    rpc.submit_transaction((&tx).into(), false).await.map_err(|e| format!("rejetée par le réseau : {e}"))?;
+    rpc.submit_transaction(crate::garde_diffusion(&tx).map_err(|e| e.to_string())?, false).await.map_err(|e| format!("rejetée par le réseau : {e}"))?;
     for _ in 0..30 {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let paid = rpc.get_utxos_by_addresses(vec![pay_to.clone()]).await.map_err(|e| format!("nœud : {e}"))?;

@@ -50,7 +50,7 @@ Limite connue (R22) : après le délai, `claim` et `refund` restent tous deux po
 
 ## Fuzzing d'état (proptest)
 
-Fichier `cli/src/fuzz.rs`. Un modèle de référence d'une vingtaine de lignes prédit l'acceptation de chaque transaction ; `proptest` génère des séquences aléatoires (attentes, paiements honnêtes, montants et frais hors limites, instants passés) mêlées à 8 familles de triche :
+Fichier `cli/src/fuzz.rs`. Un modèle de référence d'une vingtaine de lignes prédit l'acceptation de chaque transaction ; `proptest` génère des séquences aléatoires (attentes, paiements honnêtes, montants et frais hors limites, instants passés) mêlées à 9 familles de triche :
 
 | Triche | Invariant visé |
 |---|---|
@@ -62,6 +62,7 @@ Fichier `cli/src/fuzz.rs`. Un modèle de référence d'une vingtaine de lignes p
 | instant annoncé postérieur au verrou temporel | I7 |
 | signature d'une autre clé | I13 |
 | payload joint (instructions de bridge) | I10 |
+| sortie de paiement rattachée à la lignée du coffre | I6, I9 |
 
 Chaque transaction est exécutée par le vrai moteur de script de Kaspa (`TxScriptEngine`, contexte de covenants). Toute divergence entre le moteur et le modèle fait échouer le test, et proptest réduit la séquence au plus petit contre-exemple. Un test de contrôle (`banc_de_test_discriminant`) vérifie que le banc accepte bien un paiement honnête, refuse chaque triche et tranche le budget au sompi près.
 
