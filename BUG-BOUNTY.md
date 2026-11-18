@@ -32,13 +32,13 @@ Hors périmètre :
 3. **Tromper le vendeur** : obtenir le contenu de démo avec un faux coffre, un coffre insolvable
    ou sans paiement accepté par le réseau.
 
-La clé de l'agent pourra être publiée pour l'épreuve, afin de simuler un agent totalement compromis.
+La clé de l'agent pourra être publiée pour l'épreuve, afin de simuler un agent totalement compromis. Le coffre de l'épreuve utilisera des clés neuves, dédiées, distinctes de celles des essais de développement.
 
 ## Preuve demandée
 
 - L'identifiant de la transaction (TxID) sur le testnet-10 ;
 - la méthode de reproduction, pas à pas ;
-- une ouverture d'issue privée sur le dépôt (ou par message), avant toute divulgation publique.
+- un signalement privé via l'onglet **Security** du dépôt → **Report a vulnerability** (voir `SECURITY.md`), avant toute divulgation publique.
 
 ## Récompense
 
