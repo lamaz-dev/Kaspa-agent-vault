@@ -74,7 +74,7 @@ fn requirement(offer: &Offer, pay_to: &Address) -> Value {
             "profile": PROFILE,
             "paymentFlow": "upfront",
             "finality": "accepted",
-            "vaultTemplate": "agent-budget-v0.2"
+            "vaultTemplate": "agent-budget-v0.4"
         }
     })
 }
@@ -100,6 +100,9 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     let params: VaultParams = serde_json::from_value(p["vault"]["params"].clone()).map_err(|_| "paramètres du coffre invalides")?;
     let txid_in = p["vault"]["outpoint"]["txid"].as_str().ok_or("outpoint manquant")?;
     let index_in = p["vault"]["outpoint"]["index"].as_u64().ok_or("outpoint manquant")? as u32;
+    if Some(params.asset.as_str()) != pl["accepted"]["asset"].as_str() {
+        return Err("la monnaie du coffre ne correspond pas à celle de l'offre".into());
+    }
     let spk = cached_spk(&params)?;
     let vault_addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
     let utxos = rpc.get_utxos_by_addresses(vec![vault_addr]).await.map_err(|e| format!("nœud : {e}"))?;

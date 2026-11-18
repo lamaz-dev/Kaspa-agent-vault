@@ -102,8 +102,17 @@ pub fn payee(owner: &Keypair) -> Keypair {
 }
 
 /// Paramètres publics d'un coffre (tout ce qu'il faut pour recompiler son script).
+/// Monnaie du budget. `KAS` aujourd'hui ; `KSD` (Kaspa Dollar) réservé, en attente de son standard.
+pub const ASSET_KAS: &str = "KAS";
+pub const ASSET_KSD: &str = "KSD";
+fn default_asset() -> String {
+    ASSET_KAS.into()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VaultParams {
+    #[serde(default = "default_asset")]
+    pub asset: String,
     pub owner: String, // clé publique x-only, hex
     pub agent: String,
     pub lane: i64,
@@ -121,6 +130,7 @@ impl VaultParams {
     pub fn ours(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Self {
         let zero = hex::encode([0u8; 32]);
         VaultParams {
+            asset: ASSET_KAS.into(),
             owner: hex::encode(xonly(owner)),
             agent: hex::encode(xonly(agent)),
             lane: LANE,
@@ -142,6 +152,11 @@ impl VaultParams {
 }
 
 pub fn compile_params(p: &VaultParams) -> Res<SilAbiArtifact> {
+    match p.asset.as_str() {
+        ASSET_KAS => {}
+        ASSET_KSD => return Err("monnaie KSD réservée : en attente du standard Kaspa Dollar".into()),
+        other => return Err(format!("monnaie inconnue : {other}").into()),
+    }
     let b = |h: &str| -> Res<ArtifactValue> { Ok(hex::decode(h)?.into()) };
     let args: Vec<ArtifactValue> = vec![
         b(&p.owner)?,

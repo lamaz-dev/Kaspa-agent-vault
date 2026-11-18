@@ -35,13 +35,13 @@ account-based agent wallets cannot offer.
     "profile": "covenant-budget",
     "paymentFlow": "upfront",
     "finality": "accepted",
-    "vaultTemplate": "agent-budget-v0.2"
+    "vaultTemplate": "agent-budget-v0.4"
   }
 }
 ```
 
 `vaultTemplate` names the covenant source the merchant recompiles against
-(`contracts/agent_budget.sil`, version 0.2). A merchant MAY list several templates by
+(`contracts/agent_budget.sil`, version 0.4). A merchant MAY list several templates by
 offering several `accepts` entries.
 
 ## 3. Transport
@@ -86,6 +86,7 @@ input[0]  = the AgentBudget vault UTXO named by payload.vault.outpoint (entry `p
 output[0] = merchant payTo script, value = accepted.amount
 output[1] = vault continuation (enforced by the covenant itself)
 lock_time = the `nowDaa` claimed by the agent (proves elapsed time to the covenant)
+payload   = empty (enforced by the covenant: no bridge instructions can ride along)
 ```
 
 Exactly one input and two outputs; the covenant rejects anything else.
@@ -127,7 +128,19 @@ As in `kaspa-exact-v2`, with
   parallel requests.
 - The AgentBudget covenant is a prototype and has not been audited.
 
-## 9. Open questions for the Kaspa x402 maintainers
+## 9. Assets
+
+`vault.params.asset` names the budget asset and MUST equal `accepted.asset`.
+
+| Asset | Status |
+|---|---|
+| `KAS` | Supported (template `agent-budget-v0.4`). |
+| `KSD` | Reserved for Kaspa Dollar, the proposed KAS-collateralised stablecoin with a miner-voted price feed. A KSD vault template will compose with the KSD token covenant once its standard is published: same token covenant id in and out, budget counted in token units, a separate KAS UTXO for fees. |
+
+Intermediate step under study: a KAS-settled vault whose budget is denominated in dollars,
+converted at the miner-attested KAS price once that oracle is live.
+
+## 10. Open questions for the Kaspa x402 maintainers
 
 - Should `vaultTemplate` be identified by a template hash rather than a name?
 - Should the transaction use the `kaspa-sdk-safe-json-v2.0.0` encoding instead of borsh?

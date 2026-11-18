@@ -50,6 +50,9 @@ Parade côté propriétaire : récupérer le coffre (`recuperer`) ; la clé agen
 | R12 | Déni de service sur le vendeur (recompilations en masse) | Cache des scripts recompilés ; vérifications bon marché d'abord | à compléter par une limite de débit |
 | R13 | Injection via GitHub Actions | Déclenchement seulement sur la branche principale ; les demandes externes n'ont pas accès aux secrets ; clés de test seulement | à durcir : liste blanche des commandes |
 | R14 | Agent qui paie un service légitime en boucle (injection de prompt) | Le budget borne la perte ; le futur serveur MCP ajoutera un coupe-circuit (débit par domaine, confirmation humaine au-delà d'un seuil) | à concevoir avec `mcp-server/` |
+| R16 | Contournement de la liste blanche par un bridge : l'agent paie l'adresse autorisée d'un bridge en y joignant sa propre adresse de destination | Paiements de l'agent sans payload (v0.4) ; ne jamais mettre un bridge en liste blanche ; la perte reste bornée par le budget | test `instructions_de_bridge_refusees` |
+| R17 | Composition avec un jeton (futur coffre KSD) : jeton substitué ou coffre bloqué faute de KAS pour les frais | Cahier des charges du modèle KSD : même identifiant de covenant du jeton en entrée et en sortie, budget en unités du jeton, UTXO de KAS séparé pour les frais | à implémenter avec le modèle KSD |
+| R18 | Paiements cross-chain via bridge (frais de destination, remboursements bloqués) | Hors périmètre : le produit paie des services sur Kaspa ; le serveur MCP refusera par défaut toute destination de bridge | — |
 | R15 | Recharge du propriétaire pendant une dépense de l'agent | Les deux transactions dépensent le même UTXO : une seule est acceptée, l'autre est rejetée sans perte | à tester sur testnet |
 
 ## 5. Hors périmètre (v0.3)

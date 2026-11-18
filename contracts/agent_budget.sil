@@ -1,6 +1,6 @@
 pragma silverscript ^0.1.0;
 
-// AgentBudget v0.3 — coffre-fort de dépenses pour agent IA.
+// AgentBudget v0.4 — coffre-fort de dépenses pour agent IA.
 //
 // Règles garanties par le réseau Kaspa :
 //  - l'agent paie seul, dans la limite :
@@ -14,6 +14,8 @@ pragma silverscript ^0.1.0;
 //  - le coffre est une lignée unique suivie par le réseau (identifiant de covenant, KIP-20) :
 //    des fonds envoyés à la même adresse sans cette lignée ne sont pas dépensables par l'agent
 //    (ils restent récupérables par le propriétaire).
+//  - les paiements de l'agent ne portent aucune donnée (payload vide) : impossible de glisser des
+//    instructions de bridge vers une autre chaîne, même vers un destinataire autorisé.
 //  - le propriétaire garde la main sur tout (dépense hors budget, récupération, changement de règles).
 //
 // Couloirs : pour permettre plusieurs paiements en parallèle, le propriétaire crée plusieurs
@@ -49,9 +51,10 @@ contract AgentBudget(
         require(amount > 0);
         require(amount <= maxPerPayment);
 
-        // Forme stricte : un seul couloir, pas de sortie cachée.
+        // Forme stricte : un seul couloir, pas de sortie cachée, aucune donnée attachée.
         require(tx.inputs.length == 1);
         require(tx.outputs.length == 2);
+        require(OpTxPayloadLen() == 0);
 
         // Le temps : l'agent annonce `nowDaa`, le réseau garantit qu'il n'est pas dans le futur.
         require(nowDaa >= lastDaa);

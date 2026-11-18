@@ -109,13 +109,26 @@ fn run_cov(
     extra_args: Vec<ArtifactValue>,
     utxo_cov: Option<Hash>,
 ) -> Result<(), TxScriptError> {
+    run_full(vault, outputs, lock_time, signer, entry, extra_args, utxo_cov, vec![])
+}
+
+fn run_full(
+    vault: &SilAbiArtifact,
+    outputs: Vec<TransactionOutput>,
+    lock_time: u64,
+    signer: &Keypair,
+    entry: &str,
+    extra_args: Vec<ArtifactValue>,
+    utxo_cov: Option<Hash>,
+    payload: Vec<u8>,
+) -> Result<(), TxScriptError> {
     let input = TransactionInput::new_with_compute_budget(
         TransactionOutpoint::new(TransactionId::from_bytes([7; 32]), 0),
         vec![],
         0,
         1000,
     );
-    let mut tx = Transaction::new(1, vec![input], outputs, lock_time, Default::default(), 0, vec![]);
+    let mut tx = Transaction::new(1, vec![input], outputs, lock_time, Default::default(), 0, payload);
     let utxo = UtxoEntry::new(VAULT_VALUE, pay_to_script_hash_script(&bytecode(vault)), 0, false, utxo_cov);
 
     let reused = SigHashReusedValuesUnsync::new();
@@ -517,4 +530,27 @@ fn mesure_budget_de_calcul() {
     vm.execute().expect("paiement valide");
     let units = vm.used_script_units().0;
     eprintln!("unités de script : {units} => budget de calcul minimal : {}", units.div_ceil(SCRIPT_UNITS_PER_COMPUTE_BUDGET_UNIT));
+}
+
+// ---------- v0.4 ----------
+
+#[test]
+fn instructions_de_bridge_refusees() {
+    let c = ctx();
+    // Destinataire autorisé (liste blanche) mais transaction porteuse d'une adresse EVM de destination.
+    let vault = compile(&c, CAPACITY, 1_000);
+    let next = compile(&c, CAPACITY - 100_000_000 - FEE_T, 1_000);
+    let evm_dest = b"0xAttaquant000000000000000000000000000000".to_vec();
+    let r = run_full(
+        &vault,
+        vec![out(100_000_000, c.payee.clone()), cont(VAULT_VALUE - 100_000_000 - FEE_T as u64, pay_to_script_hash_script(&bytecode(&next)))],
+        1_000,
+        &c.agent,
+        "pay",
+        vec![100_000_000i64.into(), 1_000i64.into()],
+        Some(COV_A),
+        evm_dest,
+    );
+    eprintln!("refus attendu: {:?}", r.as_ref().err());
+    assert!(r.is_err());
 }

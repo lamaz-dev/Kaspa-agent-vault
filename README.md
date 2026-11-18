@@ -7,8 +7,8 @@ Kaspa (covenant SilverScript), pas par un logiciel.
 ## Architecture
 
 ```
-contracts/   le contrat AgentBudget (SilverScript), commenté en français
-tests/       22 tests du contrat dans le moteur de script de Kaspa
+contracts/   AgentBudget (coffre à budget) et DeliveryEscrow (paiement à la livraison), en SilverScript commenté
+tests/       23 tests du coffre + 8 tests du séquestre, dans le moteur de script de Kaspa
 cli/         outil en ligne de commande : déployer, payer, récupérer, démo x402 sur le testnet-10
 spec/        spécification du profil x402 « covenant-budget » (paiement direct depuis le coffre)
 testnet/     commandes à exécuter (commande.txt), journal des résultats, état public du coffre
@@ -18,16 +18,24 @@ testnet/     commandes à exécuter (commande.txt), journal des résultats, éta
 Prévu : `sdk/` (bibliothèque pour brancher un agent), `mcp-server/` (connecteur pour agents IA),
 `demo-ui/` (démo web avec les transactions en direct).
 
-## Le contrat (v0.3, prototype non audité)
+## Le coffre AgentBudget (v0.4, prototype non audité)
 
 - Plafond par paiement et budget rechargé en continu, plafonné (pas d'accumulation).
 - Liste blanche de destinataires optionnelle.
 - Couloirs parallèles pour les paiements simultanés, impossibles à combiner.
 - Frais de transaction décomptés du budget (impossible de vider le coffre par les frais).
 - Lignée unique suivie par le réseau (identifiant de covenant KIP-20) : pas de coffre cloné.
+- Paiements de l'agent sans données attachées : pas d'instructions de bridge cachées.
+- Monnaie du budget en paramètre : KAS aujourd'hui, Kaspa Dollar (KSD) réservé.
 - Contrôle total du propriétaire : dépense hors budget, recharge dans la même lignée, récupération.
 
 Modèle de menace : `spec/threat-model.md`. Prime aux bugs : `BUG-BOUNTY.md`.
+
+## Le séquestre DeliveryEscrow (v0.1, prototype)
+
+Paiement à la livraison : le vendeur n'est payé que contre une preuve de livraison signée par
+un vérificateur pour cette commande précise ; sans preuve dans le délai, l'argent revient au
+propriétaire. Ni l'un ni l'autre ne peut détourner les fonds ni gonfler les frais.
 
 ## Profil x402 « covenant-budget »
 
@@ -38,9 +46,9 @@ Démo : commande `demo-x402` (voir `testnet/journal.md`). Spécification : `spec
 
 ## Lancer les tests
 
-Copier `contracts/agent_budget.sil` et `tests/agent_budget_tests.rs` dans
+Copier les fichiers de `contracts/` et de `tests/` dans
 `silverscript/silverscript-lang/tests/` (dépôt kaspanet/silverscript), puis :
-`cargo test --release -p silverscript-lang --test agent_budget_tests`
+`cargo test --release -p silverscript-lang --test agent_budget_tests --test delivery_escrow_tests`
 
 ## Testnet-10
 
