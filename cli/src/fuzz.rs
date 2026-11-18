@@ -338,3 +338,18 @@ fn json_sans_budget_relu_a_zero() {
     let back: kaspa_rpc_core::RpcTransaction = serde_json::from_value(v).unwrap();
     assert_eq!(back.inputs[0].compute_budget, 0, "le champ manquant est relu à 0");
 }
+
+// ---------------------------------------------------------------- vecteur officiel KIP-20
+
+/// Vecteur de test de kaspanet/kips#49 (« KIP-20: specify CovenantIDHash keying and add a test
+/// vector », 20 octobre 2026) : notre calcul de l'identifiant de lignée doit donner exactement le
+/// même résultat que la spécification.
+#[test]
+fn identifiant_de_covenant_conforme_au_vecteur_kip20() {
+    use kaspa_consensus_core::hashing::covenant_id::covenant_id;
+    let txid: [u8; 32] = hex::decode("206a0c31dbe45384b86de451a177fd7c8e986d278f2a86724d941937443113ef").unwrap().try_into().unwrap();
+    let outpoint = TransactionOutpoint::new(TransactionId::from_bytes(txid), 0);
+    let out = TransactionOutput::new(90_000_000, ScriptPublicKey::new(0, vec![0x51].into()));
+    let id = covenant_id(outpoint, std::iter::once((0u32, &out)));
+    assert_eq!(id.to_string(), "c86366cec738e9a1578b2d871ee493dcaabfd79156810f13f3b62429859e394e");
+}
