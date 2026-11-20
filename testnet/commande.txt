@@ -1,5 +1,21 @@
 # Une commande par ligne. Pousser ce fichier lance l exécution sur le testnet-10.
-# essai 10 : démo x402 avec relances des appels au nœud côté vendeur
-demo-x402
+# Démos v0.5 du 20 nov. 2026
+# 0. rapatrier le coffre v0.4 (contrat archivé), puis créer un coffre v0.5
+recuperer-v04
+pause 15
+deployer
+pause 20
+etat
+# 1. achat dans le budget : accepté par le réseau
+payer 20000000
+pause 15
+# 2. prix au-dessus du plafond par achat : refusé par l outil avant tout envoi
+payer 60000000
+# 3. agent compromis qui contourne l outil : rejeté par le réseau (le covenant)
+payer 60000000 --sans-verif
+pause 5
+etat
+# 4. gel par le propriétaire : tout revient sur son adresse
+recuperer
 pause 10
 etat
