@@ -18,7 +18,7 @@ Accusé de réception sous 7 jours. Divulgation publique : 30 jours après le si
 
 ## Scope / Périmètre
 
-Contracts `contracts/agent_budget.sil` (v0.5) and `contracts/delivery_escrow.sil` (v0.2), and the vendor-side
+Contracts `contracts/agent_budget.sil` (v0.5.1) and `contracts/delivery_escrow.sil` (v0.2), and the vendor-side
 verification of the x402 "covenant-budget" profile (`cli/src/x402.rs`). Testnet only: **this code is a
 prototype, not audited, and must not hold mainnet funds.**
 
@@ -27,12 +27,12 @@ Threat model: [`spec/threat-model.md`](spec/threat-model.md). Pre-audit package:
 
 ## What the system guarantees / Ce que le système garantit
 
-Enforced by Kaspa consensus, for each vault (lane), even if the agent key, the agent software
-or the server is compromised. Proof: [`spec/borne-de-perte.md`](spec/borne-de-perte.md);
+Enforced by Kaspa consensus, for each vault (lane), even if the agent key, the agent software,
+the router or the server is compromised. Proof: [`spec/borne-de-perte.md`](spec/borne-de-perte.md);
 reproduce it locally with `./verify-proof.sh`.
 
 Garanti par le consensus de Kaspa, pour chaque coffre, même si la clé de l'agent, son logiciel,
-ou le serveur sont compromis :
+le routeur ou le serveur sont compromis :
 
 - **Loss bound / Borne de perte.** Over any real duration `D`, the agent moves out at most
   `capacity + capacity × D / refillPeriod` (amounts plus fees), never more than the vault balance.
@@ -60,3 +60,5 @@ ou le serveur sont compromis :
 
 - [2026-11-20, AgentBudget v0.4: refill time could be "set aside"](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md)
   (fixed in v0.5, found by our own loss-bound test / corrigé en v0.5, trouvé par notre propre test de borne).
+- [2026-11-20, first independent review: survival-mode decoy, owner freeze priority, parameter guards](spec/advisories/2026-11-20-v0.5-relecture-independante.md)
+  (fixed in v0.5.1 / corrigé en v0.5.1).

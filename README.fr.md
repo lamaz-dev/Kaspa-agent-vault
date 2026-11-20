@@ -11,13 +11,14 @@
 - ✅ testnet-10
 - ✅ borne de perte démontrée sur papier et vérifiée par tests automatisés contre le vrai moteur de Kaspa ([preuve](spec/borne-de-perte.md))
 - ✅ reproductible en une commande : `./verify-proof.sh`
-- ✅ CI automatique à chaque envoi, campagne longue de fuzzing chaque semaine
-- ⚠️ pas encore relu de façon indépendante, non audité
+- ✅ CI automatique à chaque envoi (preuve, tests, `cargo audit` des dépendances), campagne longue de fuzzing chaque semaine
+- ✅ clé du propriétaire chiffrée sur son appareil (Argon2id + XChaCha20-Poly1305) ; mode survie : retrouver et geler le coffre sans aucun serveur ([`retrouver`](cli/src/retrouver.rs))
+- ⚠️ relu deux fois par un relecteur IA distinct chargé de le casser (constats corrigés en v0.5.1) ; **aucun audit humain pour l'instant**
 - ⚠️ aucun déploiement mainnet : ne pas utiliser avec des fonds réels
 
-Avis de sécurité : [faille de la limite par période en v0.4, corrigée en v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md).
+Avis de sécurité : [faille de la limite par période en v0.4, corrigée en v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md) · [première relecture indépendante, corrigée en v0.5.1](spec/advisories/2026-11-20-v0.5-relecture-independante.md). Attaques volontaires sur le testnet-10 : [six attaques, six rejets](spec/attaques-testnet-2026-11-20.md).
 
-**Démonstrations testnet-10 (v0.5, 20 nov. 2026)** — journal complet : [`testnet/journal.md`](testnet/journal.md)
+**Démonstrations testnet-10 (v0.5, 20 nov. 2026 ; v0.5.1 rejouée le même jour, voir l'avis)** — journal complet : [`testnet/journal.md`](testnet/journal.md)
 
 | Étape | Résultat | Transaction |
 |---|---|---|
@@ -47,7 +48,7 @@ testnet/     commandes à exécuter (commande.txt), journal des résultats, éta
 .github/     exécution automatique sur le testnet via GitHub Actions
 ```
 
-## Le coffre AgentBudget (v0.5, prototype non audité)
+## Le coffre AgentBudget (v0.5.1, prototype non audité)
 
 - Plafond par paiement et budget rechargé en continu, plafonné (pas d'accumulation).
 - Liste blanche de destinataires optionnelle.

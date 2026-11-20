@@ -9,13 +9,14 @@ Covenant-enforced spending budgets for AI agents on Kaspa L1, written in SilverS
 - ✅ testnet-10
 - ✅ loss bound proven on paper and verified by automated tests against the real Kaspa script engine ([proof](spec/borne-de-perte.md))
 - ✅ reproducible in one command: `./verify-proof.sh`
-- ✅ automated CI on every push, long fuzzing campaign every week
-- ⚠️ not independently reviewed, not audited
+- ✅ automated CI on every push (proof, tests, `cargo audit` of dependencies), long fuzzing campaign every week
+- ✅ owner key encrypted on the owner's device (Argon2id + XChaCha20-Poly1305); survival mode: find and freeze the vault without any server ([`retrouver`](cli/src/retrouver.rs))
+- ⚠️ reviewed twice by a separate AI reviewer instructed to break it (findings fixed in v0.5.1); **no human audit yet**
 - ⚠️ no mainnet deployment; do not use with real funds
 
-Security advisory: [v0.4 rate-limit flaw, fixed in v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md).
+Security advisories: [v0.4 rate-limit flaw, fixed in v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md) · [first independent review, fixed in v0.5.1](spec/advisories/2026-11-20-v0.5-relecture-independante.md). Deliberate attacks on testnet-10: [six attacks, six rejections](spec/attaques-testnet-2026-11-20.md).
 
-**Testnet-10 demonstrations (v0.5, 2026-11-20)** — full log in [`testnet/journal.md`](testnet/journal.md)
+**Testnet-10 demonstrations (v0.5, 2026-11-20; v0.5.1 re-run the same day, see the advisory)** — full log in [`testnet/journal.md`](testnet/journal.md)
 
 | Step | Result | Transaction |
 |---|---|---|
@@ -36,7 +37,7 @@ and software are compromised.
 
 The repository contains two contracts and a demo tool:
 
-- [`contracts/agent_budget.sil`](contracts/agent_budget.sil) (AgentBudget v0.5): a token-bucket budget
+- [`contracts/agent_budget.sil`](contracts/agent_budget.sil) (AgentBudget v0.5.1): a token-bucket budget
   refilled from the DAA score at which the network recorded the vault, a per-payment cap, fees counted inside the budget, an optional payee allowlist,
   one KIP-20 lineage per vault, single-input spends with an empty payload, and an owner override.
 - [`contracts/delivery_escrow.sil`](contracts/delivery_escrow.sil) (DeliveryEscrow v0.2): pay on delivery.

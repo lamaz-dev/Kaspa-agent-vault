@@ -39,13 +39,26 @@ use silverscript_lang::compiler::{CompileOptions, compile_to_sil_abi_artifact_wi
 #[cfg(test)]
 mod fuzz;
 mod masse;
+mod attaques;
+mod cle;
+mod retrouver;
 mod sequestre;
 mod x402;
 
 const SOURCE: &str = include_str!("../../contracts/agent_budget.sil");
 /// v0.4, conservée uniquement pour rapatrier les coffres créés avant la v0.5 (R34).
 const SOURCE_V04: &str = include_str!("../../contracts/archive/agent_budget_v0.4.sil");
-pub static SOURCE_ANCIENNE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// v0.5, conservée pour rapatrier les coffres créés avant la v0.5.1 (seconde relecture, constat n° 5).
+const SOURCE_V05: &str = include_str!("../../contracts/archive/agent_budget_v0.5.sil");
+/// Version de contrat à compiler : 0 = courante, 4 = v0.4 archivée, 5 = v0.5 archivée.
+pub static SOURCE_ANCIENNE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+fn source_choisie() -> &'static str {
+    match SOURCE_ANCIENNE.load(std::sync::atomic::Ordering::Relaxed) {
+        4 => SOURCE_V04,
+        5 => SOURCE_V05,
+        _ => SOURCE,
+    }
+}
 /// Révision exacte du compilateur SilverScript (doit correspondre à Cargo.toml).
 const SILVERSCRIPT_REV: &str = "443d519e6688fa03d24c69432763b13e6abe4486";
 
@@ -60,7 +73,7 @@ const LANE: i64 = 0;
 const USE_ALLOWLIST: i64 = 0;
 const DAA_MARGIN: u64 = 100; // marge sous le score DAA du réseau (~10 s)
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Etat {
     pub txid: String,
     pub index: u32,
@@ -98,6 +111,15 @@ pub fn keypair_from_env(var: &str) -> Res<Keypair> {
     let hexkey = env::var(var).map_err(|_| format!("variable {var} absente (ou VAULT_PHRASE)"))?;
     let bytes = hex::decode(hexkey.trim())?;
     Ok(Keypair::from_seckey_slice(secp256k1::SECP256K1, &bytes)?)
+}
+
+/// Clé du propriétaire : fichier chiffré (PROPRIETAIRE_CLE, mot de passe demandé), sinon clés de
+/// test (VAULT_PHRASE ou OWNER_SK). Le fichier chiffré est le mode prévu pour un vrai propriétaire.
+pub fn charger_proprietaire() -> Res<Keypair> {
+    if let Ok(chemin) = env::var("PROPRIETAIRE_CLE") {
+        return cle::ouvrir(&chemin);
+    }
+    keypair_from_env("OWNER_SK")
 }
 
 pub fn xonly(k: &Keypair) -> Vec<u8> {
@@ -141,10 +163,14 @@ pub struct VaultParams {
 
 impl VaultParams {
     pub fn ours(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Self {
+        Self::pour(&xonly(owner), agent, tokens, last_daa)
+    }
+    /// Comme `ours`, à partir de la seule clé publique x-only du propriétaire (le routeur n'a jamais sa clé secrète).
+    pub fn pour(owner_pk: &[u8], agent: &Keypair, tokens: i64, last_daa: i64) -> Self {
         let zero = hex::encode([0u8; 32]);
         VaultParams {
             asset: ASSET_KAS.into(),
-            owner: hex::encode(xonly(owner)),
+            owner: hex::encode(owner_pk),
             agent: hex::encode(xonly(agent)),
             lane: LANE,
             capacity: CAPACITY,
@@ -195,7 +221,7 @@ pub fn compile_params(p: &VaultParams) -> Res<SilAbiArtifact> {
 /// Compilation sans garde-fous : ce qu'un attaquant peut toujours faire de son côté.
 /// Réservée aux tests antagonistes ; l'outil et le vendeur passent par `compile_params`.
 pub fn compile_unchecked(p: &VaultParams) -> Res<SilAbiArtifact> {
-    let source = if SOURCE_ANCIENNE.load(std::sync::atomic::Ordering::Relaxed) { SOURCE_V04 } else { SOURCE };
+    let source = source_choisie();
     compile_source(p, source)
 }
 
@@ -229,6 +255,10 @@ fn compile(owner: &Keypair, agent: &Keypair, tokens: i64, last_daa: i64) -> Res<
     compile_params(&VaultParams::ours(owner, agent, tokens, last_daa))
 }
 
+fn compile_pk(owner_pk: &[u8], agent: &Keypair, tokens: i64, last_daa: i64) -> Res<SilAbiArtifact> {
+    compile_params(&VaultParams::pour(owner_pk, agent, tokens, last_daa))
+}
+
 /// Construit et signe un paiement de l'agent depuis le coffre.
 /// Renvoie la transaction, l'état suivant et la valeur restante dans le coffre.
 pub fn build_pay(
@@ -240,12 +270,25 @@ pub fn build_pay(
     now: i64,
     creation: i64,
 ) -> Res<(Transaction, Etat)> {
-    let p = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
+    build_pay_pk(&xonly(owner), agent, e, amount, payee_spk, now, creation)
+}
+
+/// Paiement de l'agent depuis le coffre, avec la seule clé publique du propriétaire.
+pub fn build_pay_pk(
+    owner_pk: &[u8],
+    agent: &Keypair,
+    e: &Etat,
+    amount: i64,
+    payee_spk: ScriptPublicKey,
+    now: i64,
+    creation: i64,
+) -> Res<(Transaction, Etat)> {
+    let p = VaultParams::pour(owner_pk, agent, e.tokens, e.last_daa);
     let available = p.available(now, creation);
     let vault = compile_params(&p)?;
     let cov = e.covenant()?;
     let next_tokens = available - amount - FEE as i64; // les frais sont décomptés du budget
-    let next = compile(owner, agent, next_tokens, now)?;
+    let next = compile_pk(owner_pk, agent, next_tokens, now)?;
     let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), creation as u64, false, Some(cov));
     let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
     let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT);
@@ -348,6 +391,30 @@ pub fn load_state() -> Res<Etat> {
     Ok(serde_json::from_str(&fs::read_to_string(state_path()).map_err(|_| "aucun coffre déployé (fichier d'état absent)")?)?)
 }
 
+/// Origine du coffre (état à sa création) : seule donnée que le propriétaire doit garder pour
+/// retrouver le coffre courant sans fichier d'état ni routeur (`retrouver`).
+fn origine_path() -> String {
+    state_path().replace(".json", "-origine.json")
+}
+
+/// Mode survie : retrouve le coffre courant depuis son origine, via l'indexeur public, en
+/// vérifiant chaque saut, puis confirme auprès du nœud que la sortie existe bien.
+pub async fn retrouver_coffre(c: &KaspaRpcClient, owner_pk: &[u8], agent: &Keypair) -> Res<Etat> {
+    let origine: Etat = serde_json::from_str(&fs::read_to_string(origine_path()).map_err(|_| "origine du coffre absente : impossible de le retrouver")?)?;
+    let (pk, ag) = (owner_pk.to_vec(), agent.clone());
+    let (issue, sauts) = tokio::task::spawn_blocking(move || retrouver::retrouver(&retrouver::Rest::depuis_env(), &pk, &ag, &origine).map_err(|e| e.to_string())).await??;
+    match issue {
+        retrouver::Issue::Ferme { txid } => Err(format!("coffre déjà fermé par le propriétaire (transaction {txid})").into()),
+        retrouver::Issue::Courant(mut e) => {
+            e.valeur = montant_coffre(c, owner_pk, agent, &e).await?; // le nœud fait foi, pas l'indexeur
+            creation_coffre(c, owner_pk, agent, &e).await.map_err(|_| "l'indexeur indique un coffre que le nœud ne connaît pas (non confirmé ou indexeur en retard) : réessayer")?;
+            println!("Coffre retrouvé après {sauts} paiement(s), chaque saut vérifié : sortie {}:{}, {} TKAS", e.txid, e.index, e.valeur as f64 / 1e8);
+            save_state(&e)?;
+            Ok(e)
+        }
+    }
+}
+
 pub fn save_state(e: &Etat) -> Res<()> {
     let p = state_path();
     if let Some(dir) = std::path::Path::new(&p).parent() {
@@ -371,24 +438,79 @@ pub async fn connect() -> Res<KaspaRpcClient> {
     Ok(client)
 }
 
+/// Connexion sans message sur la sortie standard (les commandes du relais y écrivent du JSON).
+pub async fn connect_silencieux() -> Res<KaspaRpcClient> {
+    let net = NetworkId::with_suffix(NetworkType::Testnet, 10);
+    let client = KaspaRpcClient::new_with_args(WrpcEncoding::Borsh, None, Some(Resolver::default()), Some(net), None)?;
+    let opts = ConnectOptions {
+        block_async_connect: true,
+        strategy: ConnectStrategy::Fallback,
+        connect_timeout: Some(Duration::from_secs(30)),
+        ..Default::default()
+    };
+    client.connect(Some(opts)).await?;
+    eprintln!("Connecté au testnet-10 : {}", client.url().unwrap_or_default());
+    Ok(client)
+}
+
 /// v0.5 : score DAA du bloc qui a réellement inscrit le coffre courant (le contrat fait courir
 /// la recharge depuis lui). Erreur si le coffre n'est pas encore confirmé : réessayer.
-pub async fn creation_coffre(c: &KaspaRpcClient, owner: &Keypair, agent: &Keypair, e: &Etat) -> Res<i64> {
-    let spk = vault_spk(&compile(owner, agent, e.tokens, e.last_daa)?);
-    let addr = extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
+/// Erreur « sortie absente » : l'état local est périmé (le coffre a bougé) ; distincte de
+/// « pas encore confirmé », qui est passagère.
+pub const INTROUVABLE: &str = "sortie du coffre introuvable sur la chaîne (état local périmé ?)";
+
+/// Montant de la sortie courante du coffre, lu sur le nœud (lignée vérifiée).
+pub async fn montant_coffre(c: &KaspaRpcClient, owner_pk: &[u8], agent: &Keypair, e: &Etat) -> Res<u64> {
+    let p = VaultParams::pour(owner_pk, agent, e.tokens, e.last_daa);
+    let spk = vault_spk(&compile_params(&p)?);
+    let addr = kaspa_txscript::extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
     let utxos = c.get_utxos_by_addresses(vec![addr]).await?;
-    utxos
+    let u = utxos.iter().find(|u| u.outpoint.transaction_id.to_string() == e.txid && u.outpoint.index == e.index).ok_or(INTROUVABLE)?;
+    if u.utxo_entry.covenant_id != Some(e.covenant()?) {
+        return Err("sortie sans la lignée du coffre (leurre ou indexeur menteur) : refusée".into());
+    }
+    Ok(u.utxo_entry.amount)
+}
+
+pub async fn creation_coffre(c: &KaspaRpcClient, owner_pk: &[u8], agent: &Keypair, e: &Etat) -> Res<i64> {
+    let p = VaultParams::pour(owner_pk, agent, e.tokens, e.last_daa);
+    let spk = vault_spk(&compile_params(&p)?);
+    let addr = kaspa_txscript::extract_script_pub_key_address(&spk, Prefix::Testnet).map_err(|_| "adresse de coffre invalide")?;
+    let utxos = c.get_utxos_by_addresses(vec![addr]).await?;
+    let u = utxos
         .iter()
         .find(|u| u.outpoint.transaction_id.to_string() == e.txid && u.outpoint.index == e.index)
-        .map(|u| u.utxo_entry.block_daa_score)
-        .filter(|d| *d != u64::MAX)
-        .map(|d| d as i64)
-        .ok_or_else(|| "coffre pas encore confirmé sur la chaîne : réessayer dans quelques secondes".into())
+        .ok_or(INTROUVABLE)?;
+    // Montant donné par le nœud : un état (ou un indexeur) qui ment sur la valeur est détecté.
+    if u.utxo_entry.amount != e.valeur {
+        return Err(format!("montant du coffre incohérent : {} sompi annoncés, {} sur la chaîne", e.valeur, u.utxo_entry.amount).into());
+    }
+    // La sortie doit porter la LIGNÉE du coffre (identifiant de covenant attribué par le réseau,
+    // infalsifiable) : un leurre au même script, ou une sortie inventée par un indexeur, ne l'a pas.
+    if u.utxo_entry.covenant_id != Some(e.covenant()?) {
+        return Err("sortie sans la lignée du coffre (leurre ou indexeur menteur) : refusée".into());
+    }
+    if u.utxo_entry.block_daa_score == u64::MAX {
+        return Err("coffre pas encore confirmé sur la chaîne : réessayer dans quelques secondes".into());
+    }
+    Ok(u.utxo_entry.block_daa_score as i64)
 }
 
 /// Instant et inscription pour un paiement : (now, creation).
-pub async fn instants(c: &KaspaRpcClient, owner: &Keypair, agent: &Keypair, e: &Etat) -> Res<(i64, i64)> {
-    let creation = creation_coffre(c, owner, agent, e).await?;
+/// Si l'état local est périmé (un vendeur a diffusé le paiement sans confirmer, ou l'a retenu), le
+/// coffre courant est retrouvé depuis son origine avant d'abandonner (constat n° 5 du relecteur).
+pub async fn instants(c: &KaspaRpcClient, owner_pk: &[u8], agent: &Keypair, e: &Etat) -> Res<(i64, i64)> {
+    let creation = match creation_coffre(c, owner_pk, agent, e).await {
+        Ok(cr) => cr,
+        Err(err) if err.to_string() == INTROUVABLE && std::path::Path::new(&origine_path()).exists() => {
+            let courant = retrouver_coffre(c, owner_pk, agent).await.map_err(|e2| format!("{err} ; mode survie : {e2}"))?;
+            if courant != *e {
+                return Err(format!("état local périmé : coffre courant retrouvé ({}:{}) et enregistré, relancer l'opération", courant.txid, courant.index).into());
+            }
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
     let now = ((virtual_daa(c).await? - DAA_MARGIN) as i64).max(e.last_daa);
     Ok((now, creation))
 }
@@ -437,7 +559,22 @@ async fn main() -> Res<()> {
         masse::FORCER.store(true, std::sync::atomic::Ordering::Relaxed);
         println!("(refus local KIP-9 désactivé : le réseau tranchera)");
     }
-    let owner = keypair_from_env("OWNER_SK")?;
+    if cmd == "cle-creer" || cmd == "cle-info" {
+        // Clé du propriétaire chiffrée sur son appareil (option A, non-custodial).
+        let chemin = args.get(2).ok_or("chemin du fichier de clé manquant")?;
+        let publique = if cmd == "cle-creer" {
+            let k = cle::creer(chemin)?;
+            println!("Fichier de clé créé : {chemin}");
+            println!("Gardez-en une sauvegarde : sans ce fichier ET son mot de passe, le coffre ne peut plus être gelé.");
+            xonly(&k)
+        } else {
+            hex::decode(cle::lire(chemin)?.publique)? // aucun mot de passe : la clé publique est en clair
+        };
+        println!("Clé publique x-only : {}", hex::encode(&publique));
+        println!("Adresse du propriétaire (à alimenter depuis KasWare ou Kastle) : {}", Address::new(Prefix::Testnet, Version::PubKey, &publique));
+        return Ok(());
+    }
+    let owner = charger_proprietaire()?;
     let agent = keypair_from_env("AGENT_SK")?;
     let service = payee(&owner);
 
@@ -457,7 +594,7 @@ async fn main() -> Res<()> {
             match load_state() {
                 Ok(e) => {
                     // v0.5 : recharge comptée depuis l'inscription réelle du coffre (0 s'il n'est pas confirmé).
-                    let avail = match creation_coffre(&c, &owner, &agent, &e).await {
+                    let avail = match creation_coffre(&c, &xonly(&owner), &agent, &e).await {
                         Ok(cr) => VaultParams::ours(&owner, &agent, e.tokens, e.last_daa).available(daa.saturating_sub(DAA_MARGIN) as i64, cr),
                         Err(_) => 0,
                     };
@@ -515,7 +652,9 @@ async fn main() -> Res<()> {
             let txid = c.submit_transaction(garde_diffusion(&tx)?, false).await?;
             println!("Coffre déployé : {} TKAS, budget {} TKAS, lignée {}", FUND as f64 / 1e8, CAPACITY as f64 / 1e8, cov);
             println!("Transaction : {}", explorer(&txid.to_string()));
-            save_state(&Etat { txid: txid.to_string(), index: 0, valeur: FUND, tokens: CAPACITY, last_daa: now, cov_id: cov.to_string() })?;
+            let e0 = Etat { txid: txid.to_string(), index: 0, valeur: FUND, tokens: CAPACITY, last_daa: now, cov_id: cov.to_string() };
+            save_state(&e0)?;
+            fs::write(origine_path(), serde_json::to_string_pretty(&e0)?)?; // à garder par le propriétaire
             c.disconnect().await?;
         }
         "payer" => {
@@ -523,7 +662,7 @@ async fn main() -> Res<()> {
             let no_check = args.iter().any(|a| a == "--sans-verif");
             let e = load_state()?;
             let c = connect().await?;
-            let (now, creation) = instants(&c, &owner, &agent, &e).await?;
+            let (now, creation) = instants(&c, &xonly(&owner), &agent, &e).await?;
             let available = VaultParams::ours(&owner, &agent, e.tokens, e.last_daa).available(now, creation);
             println!("Budget disponible : {} TKAS, paiement demandé : {} TKAS", available as f64 / 1e8, amount as f64 / 1e8);
             if !no_check && (amount + FEE as i64 > available || amount > MAX_PER_PAYMENT) {
@@ -556,7 +695,7 @@ async fn main() -> Res<()> {
             let escrow_spk = pay_to_script_hash_script(&bytecode(&art));
             let e = load_state()?;
             let c = connect().await?;
-            let (now, creation) = instants(&c, &owner, &agent, &e).await?;
+            let (now, creation) = instants(&c, &xonly(&owner), &agent, &e).await?;
             println!("Commande « {requete} » : {} TKAS mis en séquestre, délai {timeout} blocs (~{} s), contrat de {} octets",
                 amount as f64 / 1e8, timeout / 10, sequestre::script_size(&art));
             let (tx, next_state) = build_pay(&owner, &agent, &e, amount, escrow_spk, now, creation)?;
@@ -615,24 +754,95 @@ async fn main() -> Res<()> {
             }
             c.disconnect().await?;
         }
-        "recuperer" | "recuperer-v04" => {
-            if cmd == "recuperer-v04" {
-                SOURCE_ANCIENNE.store(true, std::sync::atomic::Ordering::Relaxed);
+        "attaque" => {
+            // Testnet uniquement : l'agent compromis attaque son propre coffre ; le réseau doit rejeter.
+            let quoi = args.get(2).map(String::as_str).unwrap_or("tout");
+            let attaquant = keypair_from_env("ATTAQUANT_SK")?;
+            if !attaques::batterie(&xonly(&owner), &agent, &attaquant, quoi).await? {
+                return Err("au moins une attaque n'a pas eu le résultat attendu".into());
             }
-            let e = load_state()?;
+        }
+        "retrouver" => {
             let c = connect().await?;
-            let vault = compile(&owner, &agent, e.tokens, e.last_daa)?;
-            let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, e.covenant().ok());
-            let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
-            let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT);
-            let outputs = vec![TransactionOutput::new(e.valeur - FEE, pay_to_address_script(&address(&owner)))];
-            let mut tx = Transaction::new(1, vec![input], outputs, 0, Default::default(), 0, vec![]);
-            let s = sign(&tx, &[entry], 0, &owner);
-            tx.inputs[0].signature_script = vault_sigscript(&vault, "ownerControl", &[s.into()])?;
-            tx.finalize();
-            let txid = c.submit_transaction(garde_diffusion(&tx)?, false).await?;
-            println!("Coffre récupéré par le propriétaire : {}", explorer(&txid.to_string()));
-            fs::remove_file(state_path())?;
+            retrouver_coffre(&c, &xonly(&owner), &agent).await?;
+            c.disconnect().await?;
+        }
+        "recuperer" | "recuperer-v04" | "recuperer-v05" => {
+            match cmd {
+                "recuperer-v04" => SOURCE_ANCIENNE.store(4, std::sync::atomic::Ordering::Relaxed),
+                "recuperer-v05" => SOURCE_ANCIENNE.store(5, std::sync::atomic::Ordering::Relaxed),
+                _ => {}
+            }
+            let c = connect().await?;
+            // Gel prioritaire : frais toujours au-dessus du plafond de frais de l'agent (maxFee), en
+            // escalade ; si un paiement de l'agent occupe déjà la sortie dans la file d'attente, le gel
+            // le REMPLACE ; si le paiement de l'agent passe quand même, le coffre a bougé : on le
+            // retrouve et on recommence. Avant chaque tentative, le coffre courant est (re)localisé :
+            // état local, sinon mode survie (--sans-etat pour forcer).
+            let frais_gel = (2 * MAX_FEE as u64).max(FEE);
+            let adresse_proprio = address(&owner);
+            let mut gele = false;
+            for tentative in 1..=6u64 {
+                let local = if tentative == 1 && args.iter().any(|a| a == "--sans-etat") { None } else { load_state().ok() };
+                let e = match local {
+                    Some(e) if cmd == "recuperer-v04" || creation_coffre(&c, &xonly(&owner), &agent, &e).await.is_ok() => e,
+                    _ => {
+                        println!("État local absent ou périmé : recherche du coffre courant (mode survie)…");
+                        match retrouver_coffre(&c, &xonly(&owner), &agent).await {
+                            Ok(e) => e,
+                            Err(err) if tentative > 1 => {
+                                println!("tentative {tentative} : {err} ; nouvel essai dans 3 s");
+                                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                continue;
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
+                };
+                // escalade plafonnée : on garde au moins 0,05 TKAS de sortie (sinon trop lourde, KIP-9)
+                let frais = (frais_gel * tentative).min(e.valeur.saturating_sub(5_000_000)).max(FEE);
+                let vault = compile(&owner, &agent, e.tokens, e.last_daa)?;
+                let entry = UtxoEntry::new(e.valeur, vault_spk(&vault), 0, false, e.covenant().ok());
+                let txid_in = TransactionId::from_bytes(<[u8; 32]>::try_from(hex::decode(&e.txid)?.as_slice())?);
+                let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(txid_in, e.index), vec![], 0, CB_VAULT);
+                let outputs = vec![TransactionOutput::new(e.valeur.checked_sub(frais).ok_or("coffre trop petit pour les frais du gel")?, pay_to_address_script(&adresse_proprio))];
+                let mut tx = Transaction::new(1, vec![input], outputs, 0, Default::default(), 0, vec![]);
+                let s = sign(&tx, &[entry], 0, &owner);
+                tx.inputs[0].signature_script = vault_sigscript(&vault, "ownerControl", &[s.into()])?;
+                tx.finalize();
+                let id = tx.id();
+                let envoi = match c.submit_transaction(garde_diffusion(&tx)?, false).await {
+                    Ok(_) => Ok(()),
+                    Err(err) => {
+                        // sortie déjà prise par un paiement en attente : remplacement (frais plus élevés)
+                        println!("tentative {tentative} : {err} ; remplacement du paiement en attente");
+                        c.submit_transaction_replacement(garde_diffusion(&tx)?).await.map(|_| ()).map_err(|e| e.to_string())
+                    }
+                };
+                if let Err(err) = envoi {
+                    println!("tentative {tentative} refusée : {err}");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+                // confirmation : la sortie du gel apparaît sur l'adresse du propriétaire
+                for _ in 0..20 {
+                    let u = c.get_utxos_by_addresses(vec![adresse_proprio.clone()]).await?;
+                    if u.iter().any(|x| x.outpoint.transaction_id == id) {
+                        gele = true;
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                if gele {
+                    println!("Coffre récupéré par le propriétaire : {} (frais {} TKAS, tentative {tentative})", explorer(&id.to_string()), frais as f64 / 1e8);
+                    break;
+                }
+                println!("tentative {tentative} : gel non confirmé (l'agent a peut-être payé avant) ; on relocalise le coffre");
+            }
+            if !gele {
+                return Err("gel non confirmé après 6 tentatives : relancer recuperer".into());
+            }
+            let _ = fs::remove_file(state_path());
             c.disconnect().await?;
         }
         "recharger" => {

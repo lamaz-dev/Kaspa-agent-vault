@@ -96,6 +96,8 @@ enum Cheat {
     LooserRules,
     /// continuation sans liaison de covenant (sortir de la lignée)
     DropCovenant,
+    /// lignée déplacée sur la sortie 0 (le paiement) au lieu de la continuation (test de mutation M3)
+    MoveCovenantToPayment,
     /// troisième sortie (combiner, détourner)
     ExtraOutput(u64),
     /// annoncer un instant plus récent que le verrou temporel de la transaction
@@ -126,6 +128,7 @@ fn cheat() -> impl Strategy<Value = Cheat> {
         1 => Just(Cheat::WrongKey),
         1 => Just(Cheat::Payload),
         1 => Just(Cheat::BindPayment),
+        1 => Just(Cheat::MoveCovenantToPayment),
     ]
 }
 
@@ -188,8 +191,8 @@ fn try_pay(m: &Model, amount: i64, fee: i64, back: i64, cheat: &Cheat) -> (bool,
     }
     let entry = UtxoEntry::new(m.value, vault_spk(&cur), m.created as u64, false, Some(cov));
     let input = TransactionInput::new_with_compute_budget(TransactionOutpoint::new(TransactionId::from_bytes([3; 32]), 0), vec![], 0, CB_VAULT);
-    let binding = if matches!(cheat, Cheat::DropCovenant) { None } else { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) };
-    let pay_binding = if matches!(cheat, Cheat::BindPayment) { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) } else { None };
+    let binding = if matches!(cheat, Cheat::DropCovenant | Cheat::MoveCovenantToPayment) { None } else { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) };
+    let pay_binding = if matches!(cheat, Cheat::BindPayment | Cheat::MoveCovenantToPayment) { Some(CovenantBinding { authorizing_input: 0, covenant_id: cov }) } else { None };
     let mut outputs = vec![
         TransactionOutput { value: amount as u64, script_public_key: pay_to_address_script(&address(&k(10))), covenant: pay_binding },
         TransactionOutput { value: rest as u64, script_public_key: vault_spk(&next), covenant: binding },
@@ -252,13 +255,27 @@ fn parametres_aberrants_sans_danger_pour_les_fonds() {
     assert!(!payer(&p, 10_000_000, 2_000));
     assert!(recuperer(&p));
 
-    // Plafond par paiement supérieur à la capacité : la capacité borne toujours la dépense.
-    let mut p = VaultParams::ours(&owner, &agent, CAPACITY, 1_000);
-    p.max_per_payment = CAPACITY * 2;
-    assert!(check_params(&p).is_err());
-    assert!(payer(&p, 10_000_000, 2_000), "témoin : un paiement normal passe");
-    assert!(!payer(&p, CAPACITY + 1, 2_000));
-    assert!(recuperer(&p));
+    // v0.5.1 : chaque paramètre aberrant est refusé PAR LE SCRIPT (plus seulement par l'outil),
+    // tout paiement échoue, et le propriétaire récupère toujours tout. Témoin : paramètres sains.
+    let sain = VaultParams::ours(&owner, &agent, CAPACITY, 1_000);
+    assert!(payer(&sain, 10_000_000, 2_000), "témoin : un paiement normal passe");
+    let aberrants: Vec<(&str, Box<dyn Fn(&mut VaultParams)>)> = vec![
+        ("plafond par achat > capacité", Box::new(|p| p.max_per_payment = CAPACITY * 2)),
+        ("période négative (relecteur, constat n° 4)", Box::new(|p| p.refill_period = -REFILL)),
+        ("capacité nulle", Box::new(|p| { p.capacity = 0; p.max_per_payment = 0; p.tokens = 0; })),
+        ("capacité × période hors 63 bits", Box::new(|p| { p.capacity = i64::MAX / 2; p.refill_period = 4; p.max_per_payment = 10_000_000; })),
+        ("période 1, capacité > 2^62 (jetons + recharge hors 63 bits, seconde relecture)", Box::new(|p| { p.refill_period = 1; p.capacity = i64::MAX / 2 + 1; p.max_per_payment = 10_000_000; p.tokens = 0; })),
+        ("jetons > capacité", Box::new(|p| p.tokens = CAPACITY * 3)),
+        ("jetons négatifs", Box::new(|p| p.tokens = -1)),
+        ("frais maximum négatifs", Box::new(|p| p.max_fee = -1)),
+    ];
+    for (nom, abimer) in aberrants {
+        let mut p = sain.clone();
+        abimer(&mut p);
+        assert!(!payer(&p, 10_000_000, 2_000), "paramètre aberrant accepté par le script : {nom}");
+        assert!(!payer(&p, 10_000_000, 1_000 + REFILL), "paramètre aberrant accepté par le script (après une période) : {nom}");
+        assert!(recuperer(&p), "le propriétaire doit toujours récupérer : {nom}");
+    }
 }
 
 /// Contrôle du banc : sans ce test, un harnais qui refuserait tout passerait les propriétés.
@@ -277,6 +294,7 @@ fn banc_de_test_discriminant() {
         Cheat::WrongKey,
         Cheat::Payload,
         Cheat::BindPayment,
+        Cheat::MoveCovenantToPayment,
     ] {
         let (ok, _, _) = try_pay(&m, 10_000_000, 1_500_000, 0, &c);
         assert!(!ok, "triche acceptée : {c:?}");
@@ -345,17 +363,23 @@ proptest! {
     /// (capacity = budget/2, refillPeriod = 1 jour), cela fait au plus le budget sur toute fenêtre d'un jour.
     #[test]
     fn agent_avide_ne_depasse_jamais_la_borne(
-        pas in prop::collection::vec((0i64..REFILL / 2, 0i64..500, any::<bool>(), cheat()), 1..40),
+        pas in prop::collection::vec((0i64..REFILL / 2, 0i64..500, 0u8..3, cheat(), 1i64..MAX_PER_PAYMENT), 1..40),
         value in 200_000_000u64..2_000_000_000,
     ) {
         let mut m = Model::neuf(value, CAPACITY, 1_000_000, 1_000_000);
         let mut acceptes: Vec<(i64, i64)> = vec![]; // (now, dépense totale montant + frais)
-        for (attente, back, avide, triche) in pas {
+        for (attente, back, mode, triche, exces) in pas {
             m.chain += attente;
             let now = (m.chain - back).max(m.last);
             let fee = MAX_FEE;
             let dispo = m.available(now) - fee;
-            let amount = if avide { dispo.min(MAX_PER_PAYMENT) } else { (dispo / 3).min(MAX_PER_PAYMENT) };
+            // mode 0 : avide ; 1 : modéré ; 2 : au-delà de ce que le modèle autorise (le moteur doit
+            // refuser ; s'il acceptait, la borne ci-dessous le détecterait)
+            let amount = match mode {
+                0 => dispo.min(MAX_PER_PAYMENT),
+                1 => (dispo / 3).min(MAX_PER_PAYMENT),
+                _ => (dispo + exces).min(MAX_PER_PAYMENT + exces),
+            };
             if amount <= 0 {
                 continue;
             }
@@ -428,6 +452,23 @@ fn faille_v04_demontree() {
     let total = a + b + c;
     println!("v0.4 : dépensé sur une période : {total} = {:.2} × capacity", total as f64 / CAPACITY as f64);
     assert!(total >= 3 * CAPACITY, "la faille v0.4 n'est plus reproduite : vérifier le banc de test");
+}
+
+/// Relecture ligne à ligne (20 nov. 2026), piste écartée mais gardée en non-régression : au-delà
+/// de 500 000 000 000, le réseau lit un verrou temporel comme une DATE (millisecondes), déjà passée ;
+/// un agent pourrait annoncer un instant DAA gigantesque et obtenir une recharge complète. Ce n'est
+/// pas possible : SilverScript compile `require(tx.daa >= x)` avec une garde OpWithin(0, seuil)
+/// avant OpCheckLockTimeVerify. Ce test vérifie que la garde reste présente.
+#[test]
+fn verrou_en_date_refuse() {
+    let mut m = Model::neuf(1_000_000_000, 0, 1_000, 1_100); // réserve vide, 100 DAA réels écoulés
+    m.chain = 500_000_000_000; // verrou de la transaction = instant annoncé = seuil « date »
+    // témoin : au vrai instant, la réserve vide ne permet pas ce paiement
+    let mut vrai = m.clone();
+    vrai.chain = 1_100;
+    assert!(!try_pay(&vrai, MAX_PER_PAYMENT, MAX_FEE, 0, &Cheat::None).0);
+    let (ok, _, _) = try_pay(&m, MAX_PER_PAYMENT, MAX_FEE, 0, &Cheat::None);
+    assert!(!ok, "le moteur accepte une recharge complète obtenue par un verrou en date");
 }
 
 /// Coffre non encore confirmé (score DAA inconnu, u64::MAX dans le mempool) : paiement refusé.

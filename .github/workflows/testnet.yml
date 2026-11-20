@@ -49,7 +49,7 @@ jobs:
               [ -z "$line" ] && continue
               cmd="${line%% *}"
               case "$cmd" in
-                adresses|etat|deployer|payer|recharger|recuperer|recuperer-v04|demo-x402|pause|masse|sequestre-ouvrir|sequestre-reclamer|sequestre-rembourser) ;;
+                adresses|etat|deployer|payer|recharger|recuperer|recuperer-v04|recuperer-v05|retrouver|attaque|demo-x402|pause|masse|sequestre-ouvrir|sequestre-reclamer|sequestre-rembourser) ;;
                 *) echo "commande refusée (hors liste blanche) : $cmd"; continue ;;
               esac
               echo "\$ vault-cli $line"

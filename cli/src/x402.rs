@@ -10,6 +10,7 @@
 //!
 //! Transport : en-têtes x402 v2 PAYMENT-REQUIRED / PAYMENT-SIGNATURE / PAYMENT-RESPONSE (base64 JSON).
 
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -74,7 +75,7 @@ fn requirement(offer: &Offer, pay_to: &Address) -> Value {
             "profile": PROFILE,
             "paymentFlow": "upfront",
             "finality": "accepted",
-            "vaultTemplate": "agent-budget-v0.4"
+            "vaultTemplate": "agent-budget-v0.5"
         }
     })
 }
@@ -282,6 +283,34 @@ fn serve(handle: Handle, pay_to: Address) {
 // Agent
 // ---------------------------------------------------------------------------------------------
 
+/// Résultat d'un achat de l'agent, renvoyé par le routeur.
+#[allow(dead_code)] // utilisé par le routeur (lab)
+pub struct Achat {
+    pub statut: u16,
+    pub contenu: String,
+    pub montant: i64,
+    pub txid: Option<String>,
+    pub refus: Option<String>,
+}
+
+impl Achat {
+    fn refus(montant: i64, raison: impl Into<String>) -> Self {
+        Achat { statut: 402, contenu: String::new(), montant, txid: None, refus: Some(raison.into()) }
+    }
+}
+
+/// Achat normal (contrôles locaux actifs), pour le routeur. `max` : plafond par requête choisi par l'appelant.
+#[allow(dead_code)] // utilisé par le routeur (lab)
+pub fn acheter(handle: &Handle, owner_pk: &[u8], agent: &Keypair, url: &str, max: Option<i64>) -> Res<Achat> {
+    agent_buy(handle, owner_pk, agent, url, Mode::Normal, max)
+}
+
+/// Vendeur de démonstration, lancé dans un fil à part.
+#[allow(dead_code)] // utilisé par le routeur (lab)
+pub fn lancer_vendeur(handle: Handle, pay_to: Address) {
+    std::thread::spawn(move || serve(handle, pay_to));
+}
+
 #[derive(PartialEq)]
 enum Mode {
     Normal,
@@ -289,12 +318,80 @@ enum Mode {
     FakeVault,
 }
 
-fn agent_buy(handle: &Handle, owner: &Keypair, agent: &Keypair, url: &str, mode: Mode) -> Res<()> {
+/// Adresse interne (boucle locale, réseau privé, lien local, métadonnées cloud, non spécifiée).
+pub fn ip_interne(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.is_multicast() || v.is_documentation()
+                || o[0] == 0                                   // 0.0.0.0/8
+                || (o[0] == 100 && (o[1] & 0xC0) == 64)        // 100.64.0.0/10 (CGNAT)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)     // 192.0.0.0/24
+                || (o[0] == 198 && (o[1] & 0xFE) == 18)        // 198.18.0.0/15
+                || o[0] >= 240                                 // 240.0.0.0/4 réservé
+        }
+        IpAddr::V6(v) => {
+            let s = v.segments();
+            let v4_dans = |a: u16, b: u16| ip_interne(IpAddr::V4(std::net::Ipv4Addr::new((a >> 8) as u8, a as u8, (b >> 8) as u8, b as u8)));
+            v.is_loopback() || v.is_unspecified() || v.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00                   // fc00::/7 (ULA)
+                || (s[0] & 0xffc0) == 0xfe80                   // fe80::/10 (lien local)
+                || (s[0] & 0xffc0) == 0xfec0                   // fec0::/10 (site local, obsolète)
+                || (s[0] == 0x2001 && s[1] == 0x0db8)          // documentation
+                || v.to_ipv4_mapped().is_some_and(|m| ip_interne(IpAddr::V4(m)))           // ::ffff:a.b.c.d
+                || (s[..6] == [0; 6] && v4_dans(s[6], s[7]))                                // ::a.b.c.d (compatible)
+                || (s[..4] == [0; 4] && s[4] == 0xffff && s[5] == 0 && v4_dans(s[6], s[7])) // ::ffff:0:a.b.c.d (SIIT)
+                || (s[0] == 0x0064 && s[1] == 0xff9b && v4_dans(s[6], s[7]))                 // 64:ff9b::/96 (NAT64)
+                || (s[0] == 0x2002 && v4_dans(s[1], s[2]))                                  // 2002::/16 (6to4)
+        }
+    }
+}
+
+/// Activé par le routeur hors démo : le client HTTP refuse toute adresse interne AU MOMENT DE LA
+/// CONNEXION (et pas seulement lors du contrôle préalable), ce qui ferme le « DNS rebinding ».
+pub static BLOQUER_INTERNE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Taille maximale d'une réponse de vendeur lue en mémoire.
+pub const REPONSE_MAX: u64 = 1024 * 1024;
+
+fn client_http() -> ureq::Agent {
+    client_http_delai(Duration::from_secs(30))
+}
+
+/// Délai TOTAL de la requête, lecture du corps comprise : un vendeur qui répond goutte à goutte
+/// (« slowloris » inversé) ne peut pas bloquer l'agent au-delà.
+fn client_http_delai(total: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(Duration::from_secs(5))
+        .timeout(total)
+        .resolver(|cible: &str| -> std::io::Result<Vec<std::net::SocketAddr>> {
+            use std::net::ToSocketAddrs;
+            let adresses: Vec<_> = cible.to_socket_addrs()?.collect();
+            if BLOQUER_INTERNE.load(std::sync::atomic::Ordering::Relaxed) && (adresses.is_empty() || adresses.iter().any(|a| ip_interne(a.ip()))) {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "adresse interne refusée"));
+            }
+            Ok(adresses)
+        })
+        .build()
+}
+
+/// Lit une réponse en refusant tout ce qui dépasse REPONSE_MAX.
+fn lire_borne(r: ureq::Response) -> Res<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    r.into_reader().take(REPONSE_MAX + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > REPONSE_MAX {
+        return Err("réponse du vendeur trop volumineuse".into());
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn agent_buy(handle: &Handle, owner_pk: &[u8], agent: &Keypair, url: &str, mode: Mode, max: Option<i64>) -> Res<Achat> {
     println!("\n[AGENT] GET {url}");
-    let http = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(90)).build();
+    let http = client_http();
     let challenge = match http.get(url).call() {
         Err(ureq::Error::Status(402, r)) => r.header("PAYMENT-REQUIRED").ok_or("402 sans PAYMENT-REQUIRED")?.to_string(),
-        Ok(_) => return Err("ressource servie sans paiement ?".into()),
+        Ok(r) => return Ok(Achat { statut: r.status(), contenu: lire_borne(r)?, montant: 0, txid: None, refus: None }),
         Err(e) => return Err(format!("requête : {e}").into()),
     };
     let pr: Value = serde_json::from_slice(&B64.decode(challenge)?)?;
@@ -305,13 +402,19 @@ fn agent_buy(handle: &Handle, owner: &Keypair, agent: &Keypair, url: &str, mode:
 
     let e = load_state()?;
     let rpc = handle.block_on(connect())?;
-    let (now, creation) = handle.block_on(instants(&rpc, owner, agent, &e))?;
-    let mut params = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
+    let (now, creation) = handle.block_on(instants(&rpc, owner_pk, agent, &e))?;
+    let mut params = VaultParams::pour(owner_pk, agent, e.tokens, e.last_daa);
+    if let Some(m) = max {
+        if amount > m {
+            println!("[AGENT] je refuse : prix supérieur au plafond de cette requête");
+            return Ok(Achat::refus(amount, format!("prix {amount} sompi supérieur au plafond demandé ({m})")));
+        }
+    }
     if mode == Mode::Normal && (amount > params.max_per_payment || amount + FEE as i64 > params.available(now, creation)) {
         println!("[AGENT] je refuse moi-même : prix hors du budget de mon coffre");
-        return Ok(());
+        return Ok(Achat::refus(amount, "hors du budget du coffre : plafond par paiement ou budget disponible dépassé"));
     }
-    let (tx, next_state) = build_pay(owner, agent, &e, amount, pay_to_address_script(&pay_to), now, creation)?;
+    let (tx, next_state) = build_pay_pk(owner_pk, agent, &e, amount, pay_to_address_script(&pay_to), now, creation)?;
     if mode == Mode::FakeVault {
         params.capacity *= 100; // l'agent ment sur son budget
         params.max_per_payment *= 100;
@@ -338,17 +441,20 @@ fn agent_buy(handle: &Handle, owner: &Keypair, agent: &Keypair, url: &str, mode:
     match http.get(url).set("PAYMENT-SIGNATURE", &B64.encode(payload.to_string())).call() {
         Ok(r) => {
             let settlement: Value = serde_json::from_slice(&B64.decode(r.header("PAYMENT-RESPONSE").unwrap_or(""))?)?;
-            let content = r.into_string()?;
+            let content = lire_borne(r)?;
             println!("[AGENT] ✅ contenu reçu : « {content} »");
-            println!("[AGENT] reçu de paiement : transaction {}", settlement["transaction"].as_str().unwrap_or("?"));
+            let tx = settlement["transaction"].as_str().unwrap_or("?").to_string();
+            println!("[AGENT] reçu de paiement : transaction {tx}");
             save_state(&next_state)?;
+            Ok(Achat { statut: 200, contenu: content, montant: amount, txid: Some(tx), refus: None })
         }
         Err(ureq::Error::Status(402, r)) => {
-            println!("[AGENT] ❌ refusé par le vendeur : {}", r.into_string().unwrap_or_default());
+            let raison = lire_borne(r).unwrap_or_default();
+            println!("[AGENT] ❌ refusé par le vendeur : {raison}");
+            Ok(Achat::refus(amount, format!("refusé par le vendeur : {raison}")))
         }
-        Err(e) => return Err(format!("requête : {e}").into()),
+        Err(e) => Err(format!("requête : {e}").into()),
     }
-    Ok(())
 }
 
 /// Démo complète sur le testnet-10 : un vendeur x402 local et trois achats de l'agent.
@@ -360,18 +466,85 @@ pub async fn demo(owner: &Keypair, agent: &Keypair) -> Res<()> {
     std::thread::spawn(move || serve(h, pay_to));
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    let (o, a) = (*owner, *agent);
+    let (o, a) = (xonly(owner), *agent);
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let h = Handle::current();
         let base = format!("http://127.0.0.1:{PORT}");
         println!("\n=== Scénario 1 : achat normal, payé directement depuis le coffre ===");
-        agent_buy(&h, &o, &a, &format!("{base}/meteo-kaspa"), Mode::Normal).map_err(|e| e.to_string())?;
+        agent_buy(&h, &o, &a, &format!("{base}/meteo-kaspa"), Mode::Normal, None).map_err(|e| e.to_string())?;
         println!("\n=== Scénario 2 : prix au-dessus du plafond, le vendeur refuse avant toute diffusion ===");
-        agent_buy(&h, &o, &a, &format!("{base}/rapport-premium"), Mode::IgnoreLocalChecks).map_err(|e| e.to_string())?;
+        agent_buy(&h, &o, &a, &format!("{base}/rapport-premium"), Mode::IgnoreLocalChecks, None).map_err(|e| e.to_string())?;
         println!("\n=== Scénario 3 : l'agent présente un faux coffre, le vendeur le démasque ===");
-        agent_buy(&h, &o, &a, &format!("{base}/meteo-kaspa"), Mode::FakeVault).map_err(|e| e.to_string())?;
+        agent_buy(&h, &o, &a, &format!("{base}/meteo-kaspa"), Mode::FakeVault, None).map_err(|e| e.to_string())?;
         Ok(())
     })
     .await??;
     Ok(())
+}
+
+#[cfg(test)]
+mod vendeurs_malveillants {
+    use super::*;
+    use std::io::Write;
+    use std::net::TcpListener;
+
+    /// Faux vendeur local : écrit l'en-tête puis appelle `corps` sur la connexion.
+    fn vendeur(entete: &'static str, corps: impl Fn(&mut std::net::TcpStream) + Send + 'static) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = l.accept() {
+                let mut tampon = [0u8; 2048];
+                let _ = std::io::Read::read(&mut c, &mut tampon);
+                let _ = c.write_all(entete.as_bytes());
+                corps(&mut c);
+            }
+        });
+        format!("http://127.0.0.1:{port}/ressource")
+    }
+
+    #[test]
+    fn flux_sans_fin_coupe_a_un_mo() {
+        let url = vendeur("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n", |c| {
+            let bloc = [b'x'; 16 * 1024];
+            while c.write_all(&bloc).is_ok() {}
+        });
+        let r = client_http_delai(Duration::from_secs(20)).get(&url).call().unwrap();
+        let e = lire_borne(r).unwrap_err().to_string();
+        assert!(e.contains("trop volumineuse"), "{e}");
+    }
+
+    #[test]
+    fn reponse_goutte_a_goutte_coupee_par_le_delai() {
+        let url = vendeur("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", |c| {
+            for _ in 0..100 {
+                if c.write_all(b"x").is_err() { break; }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+        let debut = std::time::Instant::now();
+        let r = client_http_delai(Duration::from_secs(1)).get(&url).call();
+        let lu = r.map_err(|e| e.to_string()).and_then(|r| lire_borne(r).map_err(|e| e.to_string()));
+        assert!(lu.is_err(), "la lecture devait échouer");
+        assert!(debut.elapsed() < Duration::from_secs(5), "l'agent est resté bloqué {:?}", debut.elapsed());
+    }
+
+    #[test]
+    fn reponse_tronquee_detectee() {
+        let url = vendeur("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n", |c| {
+            let _ = c.write_all(b"debut seulement");
+        });
+        let r = client_http_delai(Duration::from_secs(5)).get(&url).call().unwrap();
+        assert!(lire_borne(r).is_err(), "une réponse tronquée ne doit pas passer pour complète");
+    }
+
+    #[test]
+    fn redirection_jamais_suivie() {
+        let url = vendeur("HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/latest/meta-data\r\nContent-Length: 0\r\n\r\n", |_| {});
+        match client_http_delai(Duration::from_secs(5)).get(&url).call() {
+            Ok(r) => assert_eq!(r.status(), 302),
+            Err(ureq::Error::Status(c, _)) => assert_eq!(c, 302),
+            Err(e) => panic!("{e}"),
+        }
+    }
 }
