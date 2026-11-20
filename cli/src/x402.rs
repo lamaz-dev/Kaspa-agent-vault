@@ -190,7 +190,8 @@ async fn verify_and_settle(rpc: &KaspaRpcClient, url: &str, offer: &Offer, pay_t
     // e. Solvabilité, avant toute diffusion.
     let price = offer.price as i64;
     let now = (relance!(rpc.get_block_dag_info())?.virtual_daa_score - 100) as i64;
-    let available = params.available(now);
+    // v0.5 : recharge comptée depuis l'inscription réelle du coffre (comme le contrat).
+    let available = params.available(now, vault_utxo.utxo_entry.block_daa_score as i64);
     let spent = vault_utxo.utxo_entry.amount as i64 - tx.outputs[1].value as i64; // prix + frais
     if spent - price > params.max_fee || spent < price {
         return Err("frais de la transaction hors des limites du coffre".into());
@@ -304,13 +305,13 @@ fn agent_buy(handle: &Handle, owner: &Keypair, agent: &Keypair, url: &str, mode:
 
     let e = load_state()?;
     let rpc = handle.block_on(connect())?;
-    let now = (handle.block_on(virtual_daa(&rpc))? - 100) as i64;
+    let (now, creation) = handle.block_on(instants(&rpc, owner, agent, &e))?;
     let mut params = VaultParams::ours(owner, agent, e.tokens, e.last_daa);
-    if mode == Mode::Normal && (amount > params.max_per_payment || amount + FEE as i64 > params.available(now)) {
+    if mode == Mode::Normal && (amount > params.max_per_payment || amount + FEE as i64 > params.available(now, creation)) {
         println!("[AGENT] je refuse moi-même : prix hors du budget de mon coffre");
         return Ok(());
     }
-    let (tx, next_state) = build_pay(owner, agent, &e, amount, pay_to_address_script(&pay_to), now.max(e.last_daa))?;
+    let (tx, next_state) = build_pay(owner, agent, &e, amount, pay_to_address_script(&pay_to), now, creation)?;
     if mode == Mode::FakeVault {
         params.capacity *= 100; // l'agent ment sur son budget
         params.max_per_payment *= 100;
