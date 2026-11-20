@@ -528,3 +528,71 @@ Solde du propriétaire : 1483.21 TKAS (2 UTXO)
 Coffre : 3.56 TKAS, budget disponible ~1.80427777 TKAS (sortie 0e5b28695826fa965509f966a1f860bde11454f5c55b0f64947f5c82a5b47a74:1)
 
 ```
+
+## 2026-11-20 07:18 UTC
+
+```
+$ vault-cli recuperer-v04
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Coffre récupéré par le propriétaire : https://tn10.kaspa.stream/transactions/7128d61c174426b7c0e445eca0d610def7f02ae673fce0a19793b80a8f6c04f4
+
+$ vault-cli pause 15
+(pause de 15 s)
+
+$ vault-cli deployer
+Connecté au testnet-10 : wss://alpha-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh
+Coffre déployé : 5 TKAS, budget 2 TKAS, lignée 506e624b222faf9d1d88e8fab87dc328e435fa7b010c5f50557d326d70243c2e
+Transaction : https://tn10.kaspa.stream/transactions/0ce4a427418bf0cb6d18fe23e806aa168a0b3ea4fdc42d6308d9fac6812a6c67
+
+$ vault-cli pause 20
+(pause de 20 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://electron-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 628239422
+Solde du propriétaire : 1481.74 TKAS (3 UTXO)
+Coffre : 5 TKAS, budget disponible ~2 TKAS (sortie 0ce4a427418bf0cb6d18fe23e806aa168a0b3ea4fdc42d6308d9fac6812a6c67:0)
+
+$ vault-cli payer 20000000
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 2 TKAS, paiement demandé : 0.2 TKAS
+Paiement accepté par le réseau : https://tn10.kaspa.stream/transactions/e4e4e545344e67272c35c85d01e10559b27435a3c4f095fdae885dd199d7e4d5
+
+$ vault-cli pause 15
+(pause de 15 s)
+
+$ vault-cli payer 60000000
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.787 TKAS, paiement demandé : 0.6 TKAS
+Error: "refusé localement : dépasse le budget ou le plafond par paiement (--sans-verif pour laisser le réseau trancher)"
+(code de sortie 1)
+
+$ vault-cli payer 60000000 --sans-verif
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Budget disponible : 1.78755555 TKAS, paiement demandé : 0.6 TKAS
+Paiement REFUSÉ par le réseau : RPC Server (remote error) -> Rejected transaction 23f56471973363eec84d5eae9556566876c61f73404bc92d17d1f158f32f6b4f: failed to verify the signature script: script ran, but verification failed
+(code de sortie 2)
+
+$ vault-cli pause 5
+(pause de 5 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 628239640
+Solde du propriétaire : 1481.74 TKAS (3 UTXO)
+Coffre : 4.785 TKAS, budget disponible ~1.79055555 TKAS (sortie e4e4e545344e67272c35c85d01e10559b27435a3c4f095fdae885dd199d7e4d5:1)
+
+$ vault-cli recuperer
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Coffre récupéré par le propriétaire : https://tn10.kaspa.stream/transactions/fabc445d86fbabeea0431c22c8a21964f5f0469eb1241f94cc80121f5a04447f
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 628239739
+Solde du propriétaire : 1486.51 TKAS (4 UTXO)
+Coffre : pas encore déployé
+
+```
