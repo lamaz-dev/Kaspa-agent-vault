@@ -596,3 +596,57 @@ Solde du propriétaire : 1486.51 TKAS (4 UTXO)
 Coffre : pas encore déployé
 
 ```
+
+## 2026-11-20 12:26 UTC
+
+```
+$ vault-cli deployer
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Coffre déployé : 5 TKAS, budget 2 TKAS, lignée 8251349d5548622c51174b9f63642155f8d9954680645c3c848e70de0d56e5ef
+Transaction : https://tn10.kaspa.stream/transactions/cbe7553f9eb7bdde3cbd4784838c67c35efc41c4a2acba1ee010e10048b0a1ac
+
+$ vault-cli pause 360
+(pause de 360 s)
+
+$ vault-cli attaque tout
+Connecté au testnet-10 : wss://neutrino-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh
+[ATTAQUE] jetons gonflés dans l'état suivant : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction 1c9ea9cb8be81a0cb7ac894571d2725138b7f8607e78dc4808eb4516f57bb151: failed to verify the signature script: script ran, but verification failed
+[ATTAQUE] règles plus lâches dans la continuation : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction 35fecf39c7f93d1a26e9bd8b609e08920be08f42da42abd7e89a350300e91bd2: failed to verify the signature script: script ran, but verification failed
+[ATTAQUE] reste du coffre détourné vers l'attaquant : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction 7a7db2d016934952d5f1b706ac06e483a8d2b8d6a1b3762ec3f71c07e6ba4859: failed to verify the signature script: script ran, but verification failed
+[ATTAQUE] frais excessifs (vidage par les frais) : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction eb6e25a42664065ceaa9ab54d0fc80d6ec7245d00ae302f57b756dac71aacca8: failed to verify the signature script: script ran, but verification failed
+[ATTAQUE] paiement de poussière (1 000 sompi, KIP-9) : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction f2eb5fd102b79d9ed1d12787629ba1060d6288c50ccf5513cd6e7ae527c9562f: transaction storage mass of 1000000024 is larger than max allowed size of 500000
+[TÉMOIN] vidage antidaté n°1 (0.5 TKAS) : acceptée : https://tn10.kaspa.stream/transactions/1a04be955d4fe89331ac0e9f9f5b6174ef95240bd831751d9f7d953e83eb6129
+[TÉMOIN] vidage antidaté n°2 (0.5 TKAS) : acceptée : https://tn10.kaspa.stream/transactions/b95e80481a018dac26d2d3f104e1984f3d8cc1b4c2ff6dc6f8929524baa9ef24
+[TÉMOIN] vidage antidaté n°3 (0.5 TKAS) : acceptée : https://tn10.kaspa.stream/transactions/e0e602a0dd2747760f56e78b17d51057d3deddb6cbea40cd934b4303f499aac8
+[TÉMOIN] vidage antidaté n°4 (0.44 TKAS) : acceptée : https://tn10.kaspa.stream/transactions/f7ac17af56e8a14694c0522e80332bd7a58a94f0f270f7cbe7f9683f888ae0fb
+[ATTAQUE] temps mis de côté : en v0.4 l'agent aurait disposé de 0.20288888 TKAS ; en v0.5 de 0 TKAS ; il tente 0.18788888 TKAS
+[ATTAQUE] réclamation du temps mis de côté : REJETÉE par le réseau, comme attendu
+          message du nœud : RPC Server (remote error) -> Rejected transaction 4f5a60dacbc2c600ce222502356bdc6b0d8c5815764a7156bb2372bb0f64aa1f: failed to verify the signature script: script ran, but verification failed
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 628428003
+Solde du propriétaire : 1483.405 TKAS (6 UTXO)
+Coffre : 3 TKAS, budget disponible ~0 TKAS (sortie f7ac17af56e8a14694c0522e80332bd7a58a94f0f270f7cbe7f9683f888ae0fb:1)
+
+$ vault-cli recuperer --sans-etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+État local absent ou périmé : recherche du coffre courant (mode survie)…
+Coffre retrouvé après 4 paiement(s), chaque saut vérifié : sortie f7ac17af56e8a14694c0522e80332bd7a58a94f0f270f7cbe7f9683f888ae0fb:1, 3 TKAS
+Coffre récupéré par le propriétaire : https://tn10.kaspa.stream/transactions/f59b69bee62f238af0f26d25aa8c7fd0c41fbdd1648a8069d3bdafa7902e0764 (frais 0.06 TKAS, tentative 1)
+
+$ vault-cli pause 10
+(pause de 10 s)
+
+$ vault-cli etat
+Connecté au testnet-10 : wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh
+Score DAA du réseau : 628428147
+Solde du propriétaire : 1486.345 TKAS (7 UTXO)
+Coffre : pas encore déployé
+
+```
