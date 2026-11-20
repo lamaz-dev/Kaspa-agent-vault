@@ -16,6 +16,18 @@
 - ⚠️ aucun déploiement mainnet : ne pas utiliser avec des fonds réels
 
 Avis de sécurité : [faille de la limite par période en v0.4, corrigée en v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md).
+
+**Démonstrations testnet-10 (v0.5, 20 nov. 2026)** — journal complet : [`testnet/journal.md`](testnet/journal.md)
+
+| Étape | Résultat | Transaction |
+|---|---|---|
+| Ancien coffre v0.4 rapatrié par son propriétaire | acceptée | [`7128d61c…`](https://tn10.kaspa.stream/transactions/7128d61c174426b7c0e445eca0d610def7f02ae673fce0a19793b80a8f6c04f4) |
+| Coffre v0.5 créé (5 TKAS, budget 2 TKAS) | acceptée | [`0ce4a427…`](https://tn10.kaspa.stream/transactions/0ce4a427418bf0cb6d18fe23e806aa168a0b3ea4fdc42d6308d9fac6812a6c67) |
+| 1. Achat de l'agent dans le budget (0,2 TKAS) | acceptée | [`e4e4e545…`](https://tn10.kaspa.stream/transactions/e4e4e545344e67272c35c85d01e10559b27435a3c4f095fdae885dd199d7e4d5) |
+| 2. Prix au-dessus du plafond par achat (0,6 TKAS) | refusé par l'outil, rien n'est envoyé | — |
+| 3. Agent compromis qui contourne l'outil et l'envoie quand même | **rejetée par le réseau** (`script ran, but verification failed`) ; une transaction rejetée n'arrive jamais sur la chaîne, son identifiant `23f56471…` n'a donc pas de page dans l'explorateur | — |
+| 4. Gel par le propriétaire : tout revient sur son adresse | acceptée | [`fabc445d…`](https://tn10.kaspa.stream/transactions/fabc445d86fbabeea0431c22c8a21964f5f0469eb1241f94cc80121f5a04447f) |
+
 >
 > ⚠️ **Unaudited prototype, testnet-10 only.** Never deposit real (mainnet) KAS into these contracts.
 > Public review before audit: report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).

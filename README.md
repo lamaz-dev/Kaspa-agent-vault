@@ -14,6 +14,18 @@ Covenant-enforced spending budgets for AI agents on Kaspa L1, written in SilverS
 - ⚠️ no mainnet deployment; do not use with real funds
 
 Security advisory: [v0.4 rate-limit flaw, fixed in v0.5](spec/advisories/2026-11-20-v0.4-temps-mis-de-cote.md).
+
+**Testnet-10 demonstrations (v0.5, 2026-11-20)** — full log in [`testnet/journal.md`](testnet/journal.md)
+
+| Step | Result | Transaction |
+|---|---|---|
+| Old v0.4 vault repatriated by its owner | accepted | [`7128d61c…`](https://tn10.kaspa.stream/transactions/7128d61c174426b7c0e445eca0d610def7f02ae673fce0a19793b80a8f6c04f4) |
+| v0.5 vault created (5 TKAS, budget 2 TKAS) | accepted | [`0ce4a427…`](https://tn10.kaspa.stream/transactions/0ce4a427418bf0cb6d18fe23e806aa168a0b3ea4fdc42d6308d9fac6812a6c67) |
+| 1. Agent purchase within budget (0.2 TKAS) | accepted | [`e4e4e545…`](https://tn10.kaspa.stream/transactions/e4e4e545344e67272c35c85d01e10559b27435a3c4f095fdae885dd199d7e4d5) |
+| 2. Price above the per-purchase cap (0.6 TKAS) | refused by the tool, nothing sent | — |
+| 3. Compromised agent bypasses the tool and broadcasts it anyway | **rejected by the network** (`script ran, but verification failed`); a rejected transaction never reaches the chain, so its id `23f56471…` has no explorer page | — |
+| 4. Owner freeze: everything back to the owner | accepted | [`fabc445d…`](https://tn10.kaspa.stream/transactions/fabc445d86fbabeea0431c22c8a21964f5f0469eb1241f94cc80121f5a04447f) |
+
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Overview
